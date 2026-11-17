@@ -8,7 +8,6 @@ import { AuthController } from './auth.controller.js';
 import { AuthService } from './auth.service.js';
 import { JwtAuthGuard } from './guards/jwt-auth.guard.js';
 import { RolesGuard } from './guards/roles.guard.js';
-import { PasswordService } from './password.service.js';
 import { RefreshTokenService } from './refresh-token.service.js';
 
 @Module({
@@ -28,7 +27,7 @@ import { RefreshTokenService } from './refresh-token.service.js';
   controllers: [AuthController],
   providers: [
     AuthService,
-    PasswordService,
+    // PasswordService vem do UsersModule (importado acima).
     RefreshTokenService,
     // Guards globais rodam na ordem em que são registrados. A ordem importa:
     // 1) JwtAuthGuard descobre QUEM é o usuário (preenche request.user);
@@ -36,6 +35,5 @@ import { RefreshTokenService } from './refresh-token.service.js';
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
   ],
-  exports: [PasswordService],
 })
 export class AuthModule {}

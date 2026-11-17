@@ -7,7 +7,8 @@ export type AuditAction =
   | 'LOGOUT'
   | 'REFRESH_TOKEN_REUSE'
   | 'PASSWORD_CHANGED'
-  | 'USER_CREATED';
+  | 'USER_CREATED'
+  | 'USER_UPDATED';
 
 // Campos que podem aparecer em before/after, por entidade.
 // Lista de PERMITIDOS: um campo novo (como um hash) fica fora até alguém
