@@ -4,7 +4,14 @@ describe('validateEnv', () => {
   const valid = {
     DATABASE_URL: 'postgresql://u:p@localhost:5432/db',
     CORS_ORIGINS: 'http://localhost:5173, https://app.exemplo.com',
+    JWT_ACCESS_SECRET: 'x'.repeat(32),
   };
+
+  it('recusa segredo JWT com menos de 32 caracteres', () => {
+    expect(() => validateEnv({ ...valid, JWT_ACCESS_SECRET: 'curto' })).toThrow(
+      /JWT_ACCESS_SECRET deve ter pelo menos 32 caracteres/,
+    );
+  });
 
   it('aplica os valores padrão', () => {
     const env = validateEnv(valid);

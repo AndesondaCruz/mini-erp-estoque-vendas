@@ -18,6 +18,23 @@ Fase 0 (fundação) concluída:
 - Testes unitários e e2e (Vitest + Supertest, com banco real)
 - Docker Compose com banco e API, e CI no GitHub Actions
 
+Fase 1, parte A (autenticação) concluída:
+
+| Rota | Descrição |
+|---|---|
+| `POST /api/v1/auth/login` | Access token (15 min) no corpo; refresh token (7 dias) em cookie `httpOnly`, `SameSite=Strict` |
+| `POST /api/v1/auth/refresh` | Troca o refresh token por um novo (rotação com detecção de reuso) |
+| `POST /api/v1/auth/logout` | Encerra a sessão atual |
+| `GET /api/v1/auth/me` | Dados do usuário autenticado |
+| `PATCH /api/v1/auth/me/password` | Troca a própria senha e encerra todas as sessões |
+
+- Senhas com argon2id; login com rate limit próprio (5 tentativas por minuto por IP) e mensagem genérica de erro
+- Desativar o usuário ou trocar a senha invalida os tokens já emitidos na hora
+- Auditoria de login, logout, troca de senha e reuso de token, protegida no banco contra alteração e exclusão
+- Migrations aplicadas automaticamente quando o container da API sobe
+
+Os papéis (ADMIN, GERENTE, VENDEDOR) já existem no banco; o controle de acesso por papel entra na parte B.
+
 ## Stack
 
 - Back-end: NestJS 12, TypeScript 6, Prisma 7, PostgreSQL 16
@@ -39,6 +56,14 @@ docker compose up --build --wait
 - Health: http://localhost:3000/api/v1/health
 - Swagger: http://localhost:3000/api/docs
 
+As migrations são aplicadas automaticamente. Para criar o primeiro ADMIN:
+
+```bash
+docker compose exec api node dist/seed.js
+```
+
+Login local: `admin@mini-erp.local` / `admin-local-123` (credenciais só para o ambiente local).
+
 Para parar: `docker compose down` (adicione `--volumes` para apagar também os dados do banco).
 
 ### Desenvolvimento (API fora do container)
@@ -48,8 +73,13 @@ docker compose up -d --wait db   # só o PostgreSQL, na porta 5433
 cd backend
 cp .env.example .env
 npm ci
+npm run db:deploy                # aplica as migrations
+npm run seed                     # cria o ADMIN definido em SEED_ADMIN_* no .env
 npm run start:dev
 ```
+
+Para gerar um `JWT_ACCESS_SECRET` próprio:
+`node -e "console.log(require('node:crypto').randomBytes(48).toString('base64url'))"`
 
 ### Testes e verificações
 

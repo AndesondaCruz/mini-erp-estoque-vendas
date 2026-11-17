@@ -1,10 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_GUARD, Reflector } from '@nestjs/core';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { LoggerModule } from 'nestjs-pino';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { AuditModule } from './audit/audit.module.js';
+import { AuthModule } from './auth/auth.module.js';
+import { STRICT_THROTTLE_KEY } from './common/throttle/strict-throttle.decorator.js';
 import { type Env, validateEnv } from './config/env.js';
 import { HealthModule } from './health/health.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
@@ -38,8 +41,13 @@ const VALID_REQUEST_ID = /^[\w-]{1,64}$/;
               res.setHeader(REQUEST_ID_HEADER, id);
               return id;
             },
-            // Nunca grava tokens nem cookies no log.
-            redact: ['req.headers.authorization', 'req.headers.cookie'],
+            // Nunca grava tokens nem cookies no log: nem os que chegam na
+            // requisição, nem o refresh token que sai no Set-Cookie da resposta.
+            redact: [
+              'req.headers.authorization',
+              'req.headers.cookie',
+              'res.headers["set-cookie"]',
+            ],
             // O healthcheck do Docker chama /health a cada 10s: sem isso,
             // essas linhas encobririam os logs que importam.
             autoLogging: {
@@ -53,15 +61,32 @@ const VALID_REQUEST_ID = /^[\w-]{1,64}$/;
 
     ThrottlerModule.forRootAsync({
       inject: [ConfigService],
-      useFactory: (config: ConfigService<Env, true>) => [
-        {
-          ttl: config.get('THROTTLE_TTL_MS', { infer: true }),
-          limit: config.get('THROTTLE_LIMIT', { infer: true }),
-        },
-      ],
+      useFactory: (config: ConfigService<Env, true>) => {
+        const reflector = new Reflector();
+        return [
+          {
+            name: 'default',
+            ttl: config.get('THROTTLE_TTL_MS', { infer: true }),
+            limit: config.get('THROTTLE_LIMIT', { infer: true }),
+          },
+          {
+            // Só vale nas rotas marcadas com @StrictThrottle() (login, troca de senha).
+            name: 'strict',
+            ttl: config.get('STRICT_THROTTLE_TTL_MS', { infer: true }),
+            limit: config.get('STRICT_THROTTLE_LIMIT', { infer: true }),
+            skipIf: (context) =>
+              !reflector.getAllAndOverride<boolean>(STRICT_THROTTLE_KEY, [
+                context.getHandler(),
+                context.getClass(),
+              ]),
+          },
+        ];
+      },
     }),
 
     PrismaModule,
+    AuditModule,
+    AuthModule,
     HealthModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],

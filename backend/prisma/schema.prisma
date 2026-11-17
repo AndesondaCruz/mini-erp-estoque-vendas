@@ -1,4 +1,7 @@
-// Schema do Mini-ERP. Os models entram a partir da Fase 1 (User e RefreshToken).
+// Schema do Mini-ERP. Convenções:
+// - chaves primárias UUID
+// - datas em timestamptz (UTC); o fuso só é aplicado nos relatórios
+// - nomes no banco em snake_case via @map/@@map; no código, camelCase
 // A URL do banco fica em prisma.config.ts, lida da variável DATABASE_URL.
 
 // As opções de módulo são explícitas para o código gerado ser idêntico em
@@ -15,4 +18,77 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+}
+
+enum Role {
+  ADMIN
+  GERENTE
+  VENDEDOR
+}
+
+model User {
+  id           String  @id @default(uuid()) @db.Uuid
+  name         String  @db.VarChar(120)
+  // Sempre em minúsculas (garantido por CHECK na migration), para o UNIQUE
+  // não aceitar "Ana@x.com" e "ana@x.com" como e-mails diferentes.
+  email        String  @unique @db.VarChar(254)
+  passwordHash String  @map("password_hash")
+  role         Role
+  active       Boolean @default(true)
+  // Incrementado ao trocar a senha ou desativar o usuário. Access tokens
+  // emitidos com uma versão antiga deixam de valer na hora.
+  tokenVersion Int     @default(0) @map("token_version")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  refreshTokens RefreshToken[]
+  auditLogs     AuditLog[]
+
+  @@map("users")
+}
+
+model RefreshToken {
+  id           String    @id @default(uuid()) @db.Uuid
+  userId       String    @map("user_id") @db.Uuid
+  // Todos os tokens de uma mesma sessão (login) compartilham o familyId.
+  // Se um token já rotacionado reaparecer, a família inteira é revogada.
+  familyId     String    @map("family_id") @db.Uuid
+  // SHA-256 em hexadecimal. O token em si nunca é gravado.
+  tokenHash    String    @unique @map("token_hash") @db.Char(64)
+  expiresAt    DateTime  @map("expires_at") @db.Timestamptz(3)
+  revokedAt    DateTime? @map("revoked_at") @db.Timestamptz(3)
+  // Preenchido na rotação: aponta para o token que substituiu este.
+  replacedById String?   @unique @map("replaced_by_id") @db.Uuid
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  user       User          @relation(fields: [userId], references: [id], onDelete: Restrict)
+  replacedBy RefreshToken? @relation("Rotation", fields: [replacedById], references: [id], onDelete: Restrict)
+  replaces   RefreshToken? @relation("Rotation")
+
+  @@index([userId])
+  @@index([familyId])
+  @@map("refresh_tokens")
+}
+
+// Somente inserção: a API não expõe edição nem exclusão de auditoria.
+model AuditLog {
+  id        String   @id @default(uuid()) @db.Uuid
+  // Opcional: um login com e-mail inexistente não tem usuário.
+  userId    String?  @map("user_id") @db.Uuid
+  action    String   @db.VarChar(64)
+  entity    String?  @db.VarChar(64)
+  entityId  String?  @map("entity_id") @db.VarChar(64)
+  before    Json?
+  after     Json?
+  metadata  Json?
+  ip        String?  @db.VarChar(64)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  user User? @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([createdAt])
+  @@index([userId, createdAt])
+  @@index([entity, entityId])
+  @@map("audit_logs")
 }
