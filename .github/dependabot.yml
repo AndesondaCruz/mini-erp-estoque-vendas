@@ -9,6 +9,9 @@ updates:
       interval: weekly
     open-pull-requests-limit: 5
     groups:
+      # vitest e @vitest/* precisam ter a mesma versão: chegam num PR só.
+      vitest:
+        patterns: ['vitest', '@vitest/*']
       # Agrupa atualizações menores num único PR, para reduzir ruído.
       minor-and-patch:
         update-types: [minor, patch]
@@ -19,11 +22,19 @@ updates:
         update-types: [version-update:semver-major]
       - dependency-name: '@prisma/*'
         update-types: [version-update:semver-major]
+      # Os tipos do Node acompanham a versão do runtime (Node 22, ver .nvmrc).
+      - dependency-name: '@types/node'
+        update-types: [version-update:semver-major]
 
   - package-ecosystem: docker
     directory: /backend
     schedule:
       interval: weekly
+    ignore:
+      # Trocar a versão do Node é uma decisão própria, junto com .nvmrc,
+      # CI e @types/node. Patches e minors da imagem continuam chegando.
+      - dependency-name: node
+        update-types: [version-update:semver-major]
 
   - package-ecosystem: github-actions
     directory: /
