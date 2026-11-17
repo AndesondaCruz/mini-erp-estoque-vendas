@@ -1,0 +1,11 @@
+node_modules
+dist
+coverage
+src/generated
+package-lock.json
+
+# Arquivos de terceiros instalados pelo "prisma init" (não versionados)
+.agents
+.claude
+.windsurf
+skills-lock.json
