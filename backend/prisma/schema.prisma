@@ -1,0 +1,18 @@
+// Schema do Mini-ERP. Os models entram a partir da Fase 1 (User e RefreshToken).
+// A URL do banco fica em prisma.config.ts, lida da variável DATABASE_URL.
+
+// As opções de módulo são explícitas para o código gerado ser idêntico em
+// qualquer ambiente. Sem elas, o Prisma deduz a extensão dos imports lendo o
+// tsconfig.json, e no Docker (onde o generate roda antes do tsconfig ser
+// copiado) gerava imports ".ts", que o Node não consegue carregar.
+generator client {
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  runtime             = "nodejs"
+  moduleFormat        = "esm"
+  importFileExtension = "js"
+}
+
+datasource db {
+  provider = "postgresql"
+}

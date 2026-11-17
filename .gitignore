@@ -1,0 +1,29 @@
+# Dependências e saídas de build
+node_modules/
+dist/
+build/
+coverage/
+*.tsbuildinfo
+
+# Client gerado pelo Prisma (recriado com "npm install" ou "npm run prisma:generate")
+backend/src/generated/
+
+# Variáveis de ambiente: só o .env.example é versionado
+.env
+.env.*
+!.env.example
+
+# Logs e arquivos do sistema
+*.log
+.DS_Store
+
+# Configurações pessoais de editores e assistentes de IA
+.vscode/
+.idea/
+.claude/settings.local.json
+
+# Skills de IA instaladas automaticamente pelo "prisma init"
+backend/.agents/
+backend/.claude/
+backend/.windsurf/
+backend/skills-lock.json

@@ -1,0 +1,31 @@
+# Dependabot: abre PRs semanais com atualizações de dependências.
+# Cada PR passa pelo CI antes do merge, então atualizar fica seguro.
+# O diretório /frontend entra aqui na Fase 7, quando ele existir.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /backend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # Agrupa atualizações menores num único PR, para reduzir ruído.
+      minor-and-patch:
+        update-types: [minor, patch]
+    ignore:
+      # Prisma é fixado numa versão exata: o "latest" do npm apontou para um
+      # release candidate (8.0.0-rc). A migração para o 8 será uma decisão própria.
+      - dependency-name: prisma
+        update-types: [version-update:semver-major]
+      - dependency-name: '@prisma/*'
+        update-types: [version-update:semver-major]
+
+  - package-ecosystem: docker
+    directory: /backend
+    schedule:
+      interval: weekly
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
