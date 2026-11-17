@@ -62,6 +62,21 @@ Fase 2, parte A (categorias e fornecedores) concluída:
 - CNPJ no formato alfanumérico da Receita Federal (os numéricos continuam válidos), aceito com ou sem máscara e gravado normalizado
 - Formato do CNPJ, nome não vazio e e-mail em minúsculas garantidos também por CHECK no banco
 
+Fase 2, parte B (produtos) concluída:
+
+| Rota | Quem acessa | Descrição |
+|---|---|---|
+| `GET /api/v1/products` | todos | Lista com busca por nome ou SKU, filtros por categoria, fornecedor, status e estoque baixo, paginação e ordenação |
+| `GET /api/v1/products/:id` | todos | Busca um produto |
+| `POST /api/v1/products`, `PATCH /api/v1/products/:id` | ADMIN, GERENTE | Cria (com saldo 0) e edita; reativar (`active: true`) é só do ADMIN |
+| `DELETE /api/v1/products/:id` | ADMIN | Desativa o produto, sem apagar |
+
+- O VENDEDOR não recebe o preço de custo (a chave `costPrice` não aparece na resposta) e só vê produtos ativos
+- Dinheiro trafega como texto com até 2 casas (`"12.50"`) e é gravado em `DECIMAL(12,2)`, sem passar por ponto flutuante
+- O saldo (`currentStock`) não é editável pela API de produtos: só vai mudar por movimentação de estoque (Fase 3)
+- Mudança de preço é auditada com o valor antes e depois, sob lock da linha: alterações simultâneas formam um histórico sem buracos
+- Saldo, mínimo e preços nunca negativos, garantidos por CHECK no banco; categoria com produtos não pode ser excluída
+
 ## Stack
 
 - Back-end: NestJS 12, TypeScript 6, Prisma 7, PostgreSQL 16

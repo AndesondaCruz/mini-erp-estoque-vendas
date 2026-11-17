@@ -194,3 +194,54 @@ O CNPJ foi testado com o exemplo publicado pela Receita (`12ABC34501DE35`), e n�
 
 3. **Por que um erro desconhecido do banco não vira 404 ou 409?**
    Porque a mensagem seria falsa ("não encontrado", "já existe") e o erro real sumiria. O service só traduz os códigos que entende; o resto chega ao filtro global, que responde 500 com mensagem genérica e grava a causa no log com o `requestId`.
+
+## Fase 2, parte B: produtos
+
+### Conceitos usados
+
+- **Dinheiro como texto decimal.** O JSON leva `"12.50"`, e não `12.5`. Em JavaScript, `0.1 + 0.2` dá `0.30000000000000004`; uma string vai direto para o `Decimal` do Prisma e para a coluna `DECIMAL(12,2)` sem passar por ponto flutuante. A regex `^\d{1,10}(\.\d{1,2})?$` recusa número, vírgula, sinal negativo e mais de 2 casas. A resposta sai sempre com 2 casas (`"5.50"`).
+- **Resposta por papel.** O `toProductDto` recebe o papel e só inclui `costPrice` para ADMIN e GERENTE. Para o VENDEDOR a chave não existe no objeto (nem `null`, nem `undefined`), então não aparece no JSON. Esconder só no front não adiantaria: qualquer um leria o campo chamando a API.
+- **Campo somente leitura pela API.** `currentStock` não está no DTO. Como a validação global usa `forbidNonWhitelisted`, enviá-lo responde 400. O saldo só vai mudar pelo `StockService` da Fase 3, sempre junto com uma movimentação (risco 3 do plano).
+- **Comparar duas colunas no banco.** O filtro `lowStock` usa `currentStock: { lte: prisma.product.fields.minStock }`, que vira `current_stock <= min_stock` no SQL. Cada produto tem o próprio mínimo, então não dá para comparar com um número fixo.
+- **Lock para proteger o histórico.** A edição trava a linha do produto (`SELECT ... FOR UPDATE`) antes de ler o estado atual. O preço final estaria certo mesmo sem lock (vence o último), mas a auditoria não: veja a seção seguinte.
+- **Auditoria só quando algo muda.** `PRODUCT_PRICE_CHANGED` compara os `Decimal` com `.equals()`, então mandar `"5.5"` para um preço de `5.50` não gera registro. Desativar um produto já inativo também não.
+- **O mesmo código de erro, dois significados.** P2003 no `DELETE` de categoria quer dizer "ainda há produtos apontando para ela" (409, conflito com o estado atual). No `INSERT` de produto quer dizer "a categoria informada não existe" (400, dado inválido). Cada service traduz pelo contexto da operação.
+
+### O histórico com buracos que o lock evita
+
+Preço em 10. Dois gerentes alteram ao mesmo tempo: A para 12, B para 15. Sem lock, em READ COMMITTED:
+
+1. A e B leem o produto: os dois veem 10.
+2. A grava 12 e audita "de 10 para 12".
+3. B grava 15 e audita "de 10 para 15".
+
+O preço final (15) está certo, mas o histórico diz que ele nunca foi 12. Numa investigação ("quem mudou o preço para 12?"), a resposta some.
+
+Com `SELECT ... FOR UPDATE` antes da leitura, B espera A confirmar e lê 12: a auditoria fica "10 para 12" e "12 para 15".
+
+O teste e2e dispara 5 alterações simultâneas e confere que os registros formam uma cadeia: começando em 10, cada "depois" é o "antes" de outro registro, até chegar ao preço final. Conferido nos dois sentidos: sem o `FOR UPDATE`, o teste falhou nas 3 execuções; com ele, passou nas 3.
+
+### Decisões e alternativas descartadas
+
+| Decisão | Por quê | Alternativa descartada |
+|---|---|---|
+| Dinheiro como string decimal | Nunca passa por `number`; legível no Swagger | Número decimal: erro de ponto flutuante. Centavos inteiros: seguro, mas obriga o front a converter tudo |
+| `costPrice` omitido por papel no service | Vale para qualquer cliente da API | Esconder no front: o campo continuaria na resposta |
+| Fornecedor opcional no produto | Muita compra de pequeno comércio é no atacarejo, sem cadastro | Obrigatório: forçaria fornecedores falsos como "Diversos", que sujam relatórios |
+| Fornecedor inativo não pode ser vinculado | Um fornecedor desativado não deveria receber produtos novos | Aceitar: o cadastro ficaria incoerente |
+| Lock da linha em toda edição de produto | Uma linha só, lock curto; protege a auditoria de preço e de status | Lock só quando o preço muda: mais código para pouco ganho |
+| Reativar só pelo ADMIN, via `PATCH` | Mesmo papel que desativa; sem rota extra | Rota `POST /products/:id/activate`: mais uma rota para o mesmo efeito |
+| VENDEDOR vê só produtos ativos, mesmo pedindo `active=false` | Ele só precisa do que pode vender | Responder 403 ao filtro: mais atrito sem ganho de segurança |
+| `PRODUCT_CREATED` e `PRODUCT_REACTIVATED` na auditoria (além do plano) | A cadeia de preços tem ponto de partida, e o ciclo desativar/reativar fica completo | Auditar só mudança de preço e desativação, como no plano |
+| Índice B-tree em `name` | Ajuda ordenação e busca por prefixo | Índice trigram (`pg_trgm`) para `ILIKE '%texto%'`: só vale a pena com milhares de produtos |
+
+### Perguntas de entrevista
+
+1. **Por que o preço vai como string no JSON?**
+   Porque `number` em JavaScript é ponto flutuante binário: `0.1 + 0.2` não dá `0.3`. Em dinheiro, esse erro aparece em totais e relatórios. A string vai direto para um tipo decimal (no Prisma, `Decimal`; no Postgres, `DECIMAL(12,2)`), que representa centavos exatamente. A validação por regex garante no máximo 2 casas antes de chegar ao banco.
+
+2. **Como o vendedor fica sem ver o preço de custo?**
+   No servidor: o service monta a resposta de acordo com o papel e simplesmente não inclui a chave `costPrice` para o VENDEDOR. Um teste e2e confere que a chave não existe, na lista e no detalhe. Esconder só no front não serve, porque qualquer um pode chamar a API direto.
+
+3. **Se o preço final fica certo sem lock, por que travar a linha?**
+   Por causa da auditoria. Sem lock, duas alterações simultâneas leem o mesmo preço "antes", e o histórico perde a alteração intermediária. O lock faz a segunda edição esperar e ler o valor já atualizado. Concorrência não é só "não perder dados": também é "não registrar uma história falsa".

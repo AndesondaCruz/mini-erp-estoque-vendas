@@ -8,13 +8,18 @@ export type AuditAction =
   | 'REFRESH_TOKEN_REUSE'
   | 'PASSWORD_CHANGED'
   | 'USER_CREATED'
-  | 'USER_UPDATED';
+  | 'USER_UPDATED'
+  | 'PRODUCT_CREATED'
+  | 'PRODUCT_PRICE_CHANGED'
+  | 'PRODUCT_DEACTIVATED'
+  | 'PRODUCT_REACTIVATED';
 
 // Campos que podem aparecer em before/after, por entidade.
 // Lista de PERMITIDOS: um campo novo (como um hash) fica fora até alguém
 // decidir conscientemente incluí-lo.
 export const AUDITABLE_FIELDS = {
   User: ['id', 'name', 'email', 'role', 'active'],
+  Product: ['id', 'sku', 'name', 'costPrice', 'salePrice', 'active'],
 } as const satisfies Record<string, readonly string[]>;
 
 export type AuditEntity = keyof typeof AUDITABLE_FIELDS;

@@ -40,7 +40,9 @@ describe('Catálogo: categorias e fornecedores (e2e)', () => {
   });
 
   beforeEach(async () => {
-    await prisma.$executeRawUnsafe('TRUNCATE TABLE categories, suppliers');
+    await prisma.$executeRawUnsafe(
+      'TRUNCATE TABLE products, categories, suppliers',
+    );
   });
 
   describe('matriz de permissões', () => {
