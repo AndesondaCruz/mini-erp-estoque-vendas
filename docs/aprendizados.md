@@ -89,3 +89,66 @@ Correção: depois que o `UPDATE` falha, ler o token de novo. Em READ COMMITTED,
 
 3. **Por que senha usa argon2 e o refresh token usa SHA-256?**
    Senha é curta e previsível: o hash precisa ser lento e caro em memória para tornar inviável testar milhões de palpites. O refresh token tem 256 bits aleatórios: não há palpite possível, então um hash rápido basta. E o hash do token precisa ser determinístico para eu buscar no banco por ele (`WHERE token_hash = ...`), o que o argon2, com sal aleatório, não permite.
+
+## Fase 1, parte B: usuários e RBAC
+
+### Conceitos usados
+
+- **Negar por padrão (deny-by-default).** O `RolesGuard` é global: toda rota passa por ele. Uma rota só abre se declarar `@Public()` ou `@Roles(...)` com pelo menos um papel. Esquecer o decorator gera 403 e um aviso no log, e não uma rota aberta por engano. Exemplo: um `@Get('relatorio')` novo sem decorator responde 403 até alguém decidir quem pode acessá-lo.
+- **Ordem dos guards globais.** O `JwtAuthGuard` roda primeiro e descobre quem é o usuário (preenche `request.user`). O `RolesGuard` roda depois e decide se ele pode acessar a rota. Os dois são registrados com `APP_GUARD` no `AuthModule`, nessa ordem.
+- **Método sobrescreve classe.** O `UsersController` declara `@Roles('ADMIN')` na classe. O `getAllAndOverride` procura primeiro no método e depois na classe, então um `@Roles` num método específico teria prioridade sobre o da classe.
+- **Papel lido do banco a cada requisição.** Trocar o papel de alguém vale na requisição seguinte, sem novo login. O teste e2e "trocar o papel vale na próxima requisição" promove um GERENTE a ADMIN e usa o **mesmo** token antigo para acessar `/users`.
+- **Paginação obrigatória e limitada.** `page` e `pageSize` têm valores padrão (1 e 20), e o `pageSize` tem máximo de 100. O cliente não consegue pedir a tabela inteira. A ordenação sempre desempata por `id`: sem isso, dois usuários com o mesmo nome poderiam trocar de página entre uma requisição e outra.
+- **Ordenação por lista de campos permitidos.** O `sort` só aceita `name`, `email`, `role` ou `createdAt` (`@IsIn(USER_SORT_FIELDS)`). O valor da URL nunca vira nome de coluna diretamente. Exemplo: `?sort=passwordHash` responde 400.
+- **Proteção contra mass assignment.** O `update` grava campo a campo (`name`, `email`, `role`, `active`), e não com `...dto`. Mesmo que um campo extra escapasse da validação, ele não chegaria ao banco. O `UpdateUserDto` também deixa a senha de fora: cada usuário troca a própria em `PATCH /auth/me/password`.
+- **Desativar encerra as sessões na hora.** Desativar incrementa o `tokenVersion` (invalida os access tokens) e revoga os refresh tokens. Sem o incremento, um usuário desativado e reativado em menos de 15 minutos voltaria a usar o token antigo.
+- **E-mail duplicado vira 409.** A unicidade é garantida pelo `UNIQUE` do banco, não por um "consulta antes de inserir". O erro `P2002` do Prisma é traduzido para 409. Consultar antes teria a mesma corrida de sempre: dois cadastros simultâneos passariam pela consulta.
+- **Auditoria com antes e depois.** `USER_CREATED` e `USER_UPDATED` gravam o estado em `before`/`after`, sempre pelo `toPublicUser` (nunca com o hash da senha), dentro da mesma transação da alteração.
+
+### A regra do último ADMIN
+
+Regras: um ADMIN não pode rebaixar nem desativar a si mesmo (403), e o sistema precisa manter pelo menos um ADMIN ativo (409).
+
+Com a primeira regra, o último ADMIN só pode sumir por concorrência: o ADMIN A rebaixa B enquanto B rebaixa A, no mesmo instante. Sem lock, no isolamento padrão do Postgres (READ COMMITTED):
+
+1. As duas transações contam os ADMINs ativos: as duas veem 2.
+2. As duas concluem "sobra 1, pode rebaixar" e gravam.
+3. Resultado: nenhum ADMIN ativo. Ninguém mais consegue gerenciar usuários.
+
+Correção: quando a alteração mexe em papel ou status, a transação começa com `SELECT id FROM users WHERE role = 'ADMIN' AND active = true FOR UPDATE`. Esse comando trava as linhas dos ADMINs ativos. A segunda transação fica esperando até a primeira confirmar. Quando consegue o lock, o Postgres reavalia o `WHERE` com os dados já confirmados: o ADMIN rebaixado não aparece mais na lista, sobra só o alvo, e a regra devolve 409.
+
+O lock vem **antes** da leitura do usuário pelo mesmo motivo do bug do refresh token (parte A): em READ COMMITTED, cada comando enxerga o que estava confirmado quando ele começou. Uma leitura feita antes do lock poderia estar desatualizada.
+
+O teste e2e repete a corrida 5 vezes. A requisição que perde pode receber dois códigos, e os dois estão corretos:
+
+- **403**, se ela chegou ao `RolesGuard` depois que a vencedora confirmou (o papel é lido do banco, e ela já não é ADMIN);
+- **409**, se passou pelo guard antes e ficou esperando o lock.
+
+A garantia verificada é a que importa: no fim de cada rodada, existe exatamente 1 ADMIN ativo.
+
+Trocar só o nome ou o e-mail não faz o lock. Essas alterações não afetam a regra, e travar todos os ADMINs em cada edição criaria espera à toa.
+
+### Decisões e alternativas descartadas
+
+| Decisão | Por quê | Alternativa descartada |
+|---|---|---|
+| Negar por padrão no `RolesGuard` | Esquecer um decorator bloqueia em vez de expor dados | Permitir por padrão: uma rota nova sem `@Roles` ficaria aberta para qualquer usuário logado |
+| `SELECT ... FOR UPDATE` (lock pessimista) | A disputa é rara e curta; esperar alguns milissegundos é mais simples do que repetir a transação | Isolamento `SERIALIZABLE`: o Postgres aborta uma das transações, e o código precisaria repetir em caso de erro de serialização |
+| Lock só quando a alteração mexe em papel ou status | Editar nome não afeta a regra e não deve esperar | Travar sempre: espera desnecessária em toda edição |
+| 403 para "alterar a si mesmo" e 409 para "último ADMIN" | O primeiro é proibido por quem você é; o segundo é um conflito com o estado atual dos dados | Usar 400 nos dois casos: o front não saberia diferenciar |
+| `PasswordService` fornecido pelo `UsersModule` | O `AuthModule` já importa o `UsersModule`; o caminho inverso criaria dependência circular | `forwardRef` nos dois módulos: funciona, mas esconde um acoplamento que dá para evitar |
+| `revokeAllUserSessions` como função solta em `auth/sessions.ts` | Os dois módulos usam a mesma regra, recebendo a transação como parâmetro | Injetar o `RefreshTokenService` no `UsersService`: de novo, dependência circular |
+| Unicidade do e-mail pelo `UNIQUE` do banco + 409 | Só o banco garante unicidade em concorrência | Consultar antes de inserir: dois cadastros simultâneos passariam |
+| `PATCH` sem senha | Senha é responsabilidade do próprio usuário, com confirmação da senha atual | Admin definir a senha de outro: o admin passaria a conhecer a senha |
+| Paginação por `page`/`pageSize` (offset) | Simples de explicar e suficiente para a quantidade de usuários de uma loja | Paginação por cursor: melhor para tabelas grandes, mas mais complexa para o front |
+
+### Perguntas de entrevista
+
+1. **Como você garante que o sistema nunca fica sem administrador?**
+   Duas regras: ninguém altera o próprio papel nem se desativa (403), e a alteração que tiraria o último ADMIN ativo é recusada (409). A segunda só é segura com lock: a transação trava as linhas dos ADMINs ativos com `SELECT ... FOR UPDATE` antes de decidir. Assim, duas alterações simultâneas não conseguem contar "2 ADMINs" ao mesmo tempo. Um teste e2e dispara as duas requisições juntas e verifica que sempre sobra exatamente um.
+
+2. **O que acontece se alguém criar uma rota nova e esquecer de configurar as permissões?**
+   Ela fica bloqueada. O `RolesGuard` é global e nega por padrão: sem `@Public()` ou `@Roles(...)`, responde 403 e registra um aviso no log com o nome do controller e do método. O erro aparece no desenvolvimento, e não como um vazamento em produção.
+
+3. **Por que o `sort` da listagem é validado contra uma lista, se o Prisma já usa consultas parametrizadas?**
+   Parâmetros protegem valores, não nomes de coluna. Aceitar qualquer campo deixaria o cliente ordenar por colunas internas (`passwordHash`, `tokenVersion`) e, por exemplo, deduzir informações pela ordem dos resultados, ou forçar ordenações sem índice. Com a lista, só passam os campos pensados para isso, e o resto responde 400 antes de chegar ao banco.

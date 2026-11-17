@@ -5,6 +5,7 @@ import type { Env } from '../config/env.js';
 import type { Prisma } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { REFRESH_REUSE_GRACE_MS } from './auth.constants.js';
+import { revokeAllUserSessions } from './sessions.js';
 
 type Tx = Prisma.TransactionClient;
 
@@ -107,11 +108,8 @@ export class RefreshTokenService {
   }
 
   /** Encerra todas as sessões do usuário (troca de senha, desativação). */
-  async revokeAllForUser(userId: string, db: Tx = this.prisma): Promise<void> {
-    await db.refreshToken.updateMany({
-      where: { userId, revokedAt: null },
-      data: { revokedAt: new Date() },
-    });
+  revokeAllForUser(userId: string, db: Tx = this.prisma): Promise<void> {
+    return revokeAllUserSessions(db, userId);
   }
 
   /** Dono e família de um token, sem validar expiração (usado no logout). */

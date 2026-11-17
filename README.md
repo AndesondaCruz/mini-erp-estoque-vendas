@@ -33,7 +33,20 @@ Fase 1, parte A (autenticação) concluída:
 - Auditoria de login, logout, troca de senha e reuso de token, protegida no banco contra alteração e exclusão
 - Migrations aplicadas automaticamente quando o container da API sobe
 
-Os papéis (ADMIN, GERENTE, VENDEDOR) já existem no banco; o controle de acesso por papel entra na parte B.
+Fase 1, parte B (usuários e controle de acesso por papel) concluída:
+
+| Rota | Descrição |
+|---|---|
+| `GET /api/v1/users` | Lista com paginação, busca por nome ou e-mail, filtros por papel e status, e ordenação |
+| `GET /api/v1/users/:id` | Busca um usuário |
+| `POST /api/v1/users` | Cria um usuário |
+| `PATCH /api/v1/users/:id` | Edita nome, e-mail, papel ou status; desativar encerra as sessões do usuário |
+
+- Todas as rotas de usuários são exclusivas do ADMIN
+- Controle de acesso negado por padrão: uma rota sem `@Public()` ou `@Roles(...)` responde 403
+- Trocar o papel de alguém vale na requisição seguinte, sem novo login
+- O sistema não permite ficar sem ADMIN ativo, nem em alterações simultâneas
+- Criação e edição de usuários entram na auditoria, com o estado antes e depois
 
 ## Stack
 
