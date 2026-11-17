@@ -12,7 +12,9 @@ export type AuditAction =
   | 'PRODUCT_CREATED'
   | 'PRODUCT_PRICE_CHANGED'
   | 'PRODUCT_DEACTIVATED'
-  | 'PRODUCT_REACTIVATED';
+  | 'PRODUCT_REACTIVATED'
+  | 'STOCK_MANUAL_EXIT'
+  | 'STOCK_ADJUSTED';
 
 // Campos que podem aparecer em before/after, por entidade.
 // Lista de PERMITIDOS: um campo novo (como um hash) fica fora até alguém
@@ -20,6 +22,14 @@ export type AuditAction =
 export const AUDITABLE_FIELDS = {
   User: ['id', 'name', 'email', 'role', 'active'],
   Product: ['id', 'sku', 'name', 'costPrice', 'salePrice', 'active'],
+  StockMovement: [
+    'id',
+    'productId',
+    'type',
+    'quantity',
+    'balanceAfter',
+    'reason',
+  ],
 } as const satisfies Record<string, readonly string[]>;
 
 export type AuditEntity = keyof typeof AUDITABLE_FIELDS;

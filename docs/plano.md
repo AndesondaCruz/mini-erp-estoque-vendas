@@ -398,3 +398,10 @@ Decisões da Fase 2 (17/11/2026):
 12. Dinheiro trafega no JSON como string decimal (`"12.50"`), validada por regex e convertida direto para o `Decimal` do Prisma, sem passar por `number`. Descartados: número decimal (`0.1 + 0.2` no JavaScript) e centavos inteiros (seguro, mas exige conversão em todo o front).
 13. Nome de categoria em `citext`: o `UNIQUE` recusa "bebidas" quando já existe "Bebidas", e o nome continua gravado como foi digitado. Descartado: índice único em `lower(name)`, que o Prisma não conhece e poderia tentar remover numa migration futura.
 14. CNPJ no formato alfanumérico da Receita Federal (12 posições de 0-9 ou A-Z e 2 dígitos verificadores; cada caractere vale o código ASCII menos 48 no módulo 11). Uma validação "só 14 dígitos" recusaria CNPJs novos válidos.
+
+Decisões da Fase 3 (17/11/2026):
+
+15. Saída manual exige motivo (além de AJUSTE e ESTORNO, como já previsto). Uma saída que não é venda (avaria, vencimento, consumo interno) é o que alguém vai querer investigar depois. Garantido por CHECK no banco; na Fase 4, a saída gerada por venda passa a ser identificada pela venda.
+16. `POST /stock/movements` recebe `quantity` para ENTRADA e SAIDA e `countedStock` para AJUSTE. O gerente informa o que contou, e o servidor calcula a diferença com a linha travada (risco 4). Mandar o campo do outro tipo responde 400.
+17. A coluna `saleId` de `StockMovement` entra na Fase 4, junto com a tabela de vendas, para já nascer com chave estrangeira.
+18. Exercícios do modo mentor ficam para o fim do projeto, numa rodada única (pedido do Andeson).
