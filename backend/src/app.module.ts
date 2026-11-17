@@ -7,10 +7,12 @@ import { LoggerModule } from 'nestjs-pino';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { AuditModule } from './audit/audit.module.js';
 import { AuthModule } from './auth/auth.module.js';
+import { CategoriesModule } from './categories/categories.module.js';
 import { STRICT_THROTTLE_KEY } from './common/throttle/strict-throttle.decorator.js';
 import { type Env, validateEnv } from './config/env.js';
 import { HealthModule } from './health/health.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
+import { SuppliersModule } from './suppliers/suppliers.module.js';
 
 const REQUEST_ID_HEADER = 'x-request-id';
 const VALID_REQUEST_ID = /^[\w-]{1,64}$/;
@@ -88,6 +90,8 @@ const VALID_REQUEST_ID = /^[\w-]{1,64}$/;
     AuditModule,
     AuthModule,
     HealthModule,
+    CategoriesModule,
+    SuppliersModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

@@ -48,6 +48,20 @@ Fase 1, parte B (usuários e controle de acesso por papel) concluída:
 - O sistema não permite ficar sem ADMIN ativo, nem em alterações simultâneas
 - Criação e edição de usuários entram na auditoria, com o estado antes e depois
 
+Fase 2, parte A (categorias e fornecedores) concluída:
+
+| Rota | Quem acessa | Descrição |
+|---|---|---|
+| `GET /api/v1/categories` | todos | Lista com paginação, busca por nome e ordenação |
+| `POST /api/v1/categories`, `PATCH /api/v1/categories/:id` | ADMIN, GERENTE | Cria e renomeia; nome repetido, mesmo com outra capitalização, responde 409 |
+| `DELETE /api/v1/categories/:id` | ADMIN, GERENTE | Exclui a categoria |
+| `GET /api/v1/suppliers`, `GET /api/v1/suppliers/:id` | ADMIN, GERENTE | Lista com busca por nome ou CNPJ e filtro de status |
+| `POST /api/v1/suppliers`, `PATCH /api/v1/suppliers/:id` | ADMIN, GERENTE | Cria e edita; `null` apaga um campo opcional e `active: true` reativa |
+| `DELETE /api/v1/suppliers/:id` | ADMIN, GERENTE | Desativa o fornecedor, sem apagar |
+
+- CNPJ no formato alfanumérico da Receita Federal (os numéricos continuam válidos), aceito com ou sem máscara e gravado normalizado
+- Formato do CNPJ, nome não vazio e e-mail em minúsculas garantidos também por CHECK no banco
+
 ## Stack
 
 - Back-end: NestJS 12, TypeScript 6, Prisma 7, PostgreSQL 16

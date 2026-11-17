@@ -27,7 +27,7 @@ export async function resetDatabase(app: INestApplication): Promise<void> {
   await app
     .get(PrismaService)
     .$executeRawUnsafe(
-      'TRUNCATE TABLE audit_logs, refresh_tokens, users RESTART IDENTITY CASCADE',
+      'TRUNCATE TABLE audit_logs, refresh_tokens, users, categories, suppliers RESTART IDENTITY CASCADE',
     );
 }
 
