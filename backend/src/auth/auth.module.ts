@@ -7,6 +7,7 @@ import { UsersModule } from '../users/users.module.js';
 import { AuthController } from './auth.controller.js';
 import { AuthService } from './auth.service.js';
 import { JwtAuthGuard } from './guards/jwt-auth.guard.js';
+import { RolesGuard } from './guards/roles.guard.js';
 import { PasswordService } from './password.service.js';
 import { RefreshTokenService } from './refresh-token.service.js';
 
@@ -29,8 +30,11 @@ import { RefreshTokenService } from './refresh-token.service.js';
     AuthService,
     PasswordService,
     RefreshTokenService,
-    // Global: toda rota exige autenticação, exceto as marcadas com @Public().
+    // Guards globais rodam na ordem em que são registrados. A ordem importa:
+    // 1) JwtAuthGuard descobre QUEM é o usuário (preenche request.user);
+    // 2) RolesGuard decide se esse usuário PODE acessar a rota.
     { provide: APP_GUARD, useClass: JwtAuthGuard },
+    { provide: APP_GUARD, useClass: RolesGuard },
   ],
   exports: [PasswordService],
 })

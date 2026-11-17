@@ -30,6 +30,7 @@ import { type AuthResult, AuthService } from './auth.service.js';
 import type { AuthenticatedUser } from './authenticated-user.js';
 import { CurrentUser } from './decorators/current-user.decorator.js';
 import { Public } from './decorators/public.decorator.js';
+import { Roles } from './decorators/roles.decorator.js';
 import { AuthResponseDto, PublicUserDto } from './dto/auth-response.dto.js';
 import { ChangePasswordDto } from './dto/change-password.dto.js';
 import { LoginDto } from './dto/login.dto.js';
@@ -98,6 +99,7 @@ export class AuthController {
   }
 
   @Get('me')
+  @Roles('ADMIN', 'GERENTE', 'VENDEDOR')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Dados do usuário autenticado' })
   @ApiOkResponse({ type: PublicUserDto })
@@ -108,6 +110,7 @@ export class AuthController {
 
   @StrictThrottle()
   @Patch('me/password')
+  @Roles('ADMIN', 'GERENTE', 'VENDEDOR')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiBearerAuth()
   @ApiOperation({
