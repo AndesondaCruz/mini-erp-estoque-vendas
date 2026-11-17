@@ -1,7 +1,7 @@
 # Build em várias etapas: a imagem final leva só o código compilado
 # e as dependências de produção, sem TypeScript, testes ou ferramentas de build.
 
-FROM node:22-alpine AS base
+FROM node:26-alpine AS base
 WORKDIR /app
 # O Node 22 traz o npm 10, que ignora o campo "allowScripts" do package.json.
 # O npm 11 respeita a lista e não executa scripts de instalação não aprovados.
@@ -24,7 +24,7 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts
 
 # 4) Imagem final
-FROM node:22-alpine AS runtime
+FROM node:26-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=prod-deps --chown=node:node /app/node_modules ./node_modules
