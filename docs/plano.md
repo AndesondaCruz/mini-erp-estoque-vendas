@@ -337,8 +337,9 @@ Regra de trabalho: uma branch e um PR por feature, título em Conventional Commi
 - CRUD de usuários (ADMIN) com a regra do último ADMIN sob lock (`FOR UPDATE`).
 - Desativação e troca de papel revogam sessões e incrementam `tokenVersion`.
 
-**Fase 2: catálogo** (`feat/catalog`)
-- Categorias, fornecedores e produtos, com CHECKs, soft delete, ocultação de `costPrice` para VENDEDOR, auditoria de alteração de preços.
+**Fase 2: catálogo**, dividida em dois PRs (decisão 11):
+- *Parte A* (`feat/catalog-categories-suppliers`): categorias e fornecedores.
+- *Parte B* (`feat/catalog-products`): produtos, com CHECKs, soft delete, ocultação de `costPrice` para VENDEDOR, auditoria de alteração de preços.
 - Primeiro teste unitário de service: proposto para você escrever.
 
 **Fase 3: movimentações de estoque** (`feat/stock-movements`)
@@ -390,3 +391,10 @@ Decisões da Fase 1 (17/11/2026):
 8. Fase 1 dividida em dois PRs (autenticação; usuários e RBAC).
 9. JWT com `@nestjs/jwt` e guard próprio. Descartados: Passport (camada extra sem ganho aqui) e `@nestjs/authentication` (versão 0.1.x, recém-publicado e muito mais amplo que o necessário).
 10. argon2id com os parâmetros mínimos da OWASP (19 MiB, t=2, p=1), e não o padrão da biblioteca (64 MiB), por causa do limite de memória do container. Hashes antigos são atualizados no login.
+
+Decisões da Fase 2 (17/11/2026):
+
+11. Fase 2 dividida em dois PRs: categorias e fornecedores; depois produtos, que concentram as regras de preço, custo e estoque.
+12. Dinheiro trafega no JSON como string decimal (`"12.50"`), validada por regex e convertida direto para o `Decimal` do Prisma, sem passar por `number`. Descartados: número decimal (`0.1 + 0.2` no JavaScript) e centavos inteiros (seguro, mas exige conversão em todo o front).
+13. Nome de categoria em `citext`: o `UNIQUE` recusa "bebidas" quando já existe "Bebidas", e o nome continua gravado como foi digitado. Descartado: índice único em `lower(name)`, que o Prisma não conhece e poderia tentar remover numa migration futura.
+14. CNPJ no formato alfanumérico da Receita Federal (12 posições de 0-9 ou A-Z e 2 dígitos verificadores; cada caractere vale o código ASCII menos 48 no módulo 11). Uma validação "só 14 dígitos" recusaria CNPJs novos válidos.

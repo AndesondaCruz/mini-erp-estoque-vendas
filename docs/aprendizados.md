@@ -152,3 +152,45 @@ Trocar só o nome ou o e-mail não faz o lock. Essas alterações não afetam a 
 
 3. **Por que o `sort` da listagem é validado contra uma lista, se o Prisma já usa consultas parametrizadas?**
    Parâmetros protegem valores, não nomes de coluna. Aceitar qualquer campo deixaria o cliente ordenar por colunas internas (`passwordHash`, `tokenVersion`) e, por exemplo, deduzir informações pela ordem dos resultados, ou forçar ordenações sem índice. Com a lista, só passam os campos pensados para isso, e o resto responde 400 antes de chegar ao banco.
+
+## Fase 2, parte A: categorias e fornecedores
+
+### Conceitos usados
+
+- **`citext` (texto sem diferenciar maiúsculas).** A coluna `categories.name` compara "Bebidas" e "bebidas" como iguais, então o `UNIQUE` recusa a segunda. O valor é gravado como foi digitado. A extensão é criada na migration (`CREATE EXTENSION IF NOT EXISTS citext`), porque o Prisma gera a coluna, mas não a extensão.
+- **O banco garante, a API traduz.** Três regras desta fase moram no banco: nome de categoria único, CNPJ único e "categoria com produtos não pode ser excluída" (chave estrangeira `RESTRICT`, que entra no PR de produtos). O helper `isPrismaError` reconhece os códigos do Prisma, e cada service converte: P2002 e P2003 viram 409; P2025 vira 404. Qualquer outro erro passa adiante e vira 500 no filtro global.
+- **CNPJ alfanumérico.** A Receita Federal passou a adotar, a partir de 2026, CNPJs com letras nas 12 primeiras posições; os 2 dígitos verificadores continuam numéricos. O cálculo é o módulo 11 de sempre, mas cada caractere vale o código ASCII menos 48 (`'7'` vale 7, `'A'` vale 17). Os CNPJs só com números são um caso particular e continuam válidos.
+- **Normalizar na entrada.** O CNPJ chega com ou sem máscara e em qualquer capitalização; um `@Transform` remove `.`, `/`, `-` e espaços e passa para maiúsculas antes da validação. Assim `11.222.333/0001-81` e `11222333000181` são o mesmo valor, e o `UNIQUE` funciona. A busca usa a mesma normalização: digitar "11.222.333" encontra o fornecedor.
+- **Validação em duas camadas.** A API confere os dígitos verificadores (mensagem clara, 400). O banco confere o formato com um CHECK (`^[0-9A-Z]{12}[0-9]{2}$`). Um teste e2e insere direto no banco, sem passar pela API, para provar que o CHECK funciona sozinho.
+- **`null` contra campo ausente no PATCH.** Em fornecedores, `{"phone": null}` apaga o telefone, e um corpo sem `phone` mantém o valor. O service grava campo a campo, e o Prisma trata `undefined` como "não alterar" e `null` como "gravar NULL".
+- **Exclusão física contra desativação.** Categoria não tem histórico próprio: `DELETE` apaga. Fornecedor vai ser referenciado por produtos: `DELETE` só desativa (`active = false`), e `PATCH {"active": true}` reativa.
+- **Teste unitário com banco falso.** O service roda de verdade, mas cada método do Prisma é um `vi.fn()` que o teste controla (`mockRejectedValue`) e inspeciona (`toHaveBeenCalledWith`). Os testes seguem Arrange, Act, Assert.
+
+### Teste conferido nos dois sentidos
+
+Um teste que nunca falhou não prova nada. O teste "categoria com produtos (P2003): 409" foi conferido trocando, de propósito, o código do erro no service: o teste falhou (e só ele). Com o service restaurado, voltou a passar.
+
+O CNPJ foi testado com o exemplo publicado pela Receita (`12ABC34501DE35`), e não com um valor calculado pelo próprio código. Se o algoritmo estivesse errado, um valor calculado por ele passaria no teste mesmo assim.
+
+### Decisões e alternativas descartadas
+
+| Decisão | Por quê | Alternativa descartada |
+|---|---|---|
+| `citext` no nome da categoria | O Prisma conhece o tipo (`@db.Citext`), e o `@unique` continua visível no schema | Índice único em `lower(name)` escrito à mão: o Prisma não conhece índices sobre expressões e poderia tentar removê-lo numa migration futura |
+| Aceitar CNPJ alfanumérico | CNPJs novos têm letras; validar "só 14 dígitos" recusaria empresas reais | Formato antigo: funcionaria hoje e quebraria com o primeiro fornecedor novo |
+| CNPJ normalizado antes de gravar | Um único formato no banco faz o `UNIQUE` e a busca funcionarem | Gravar como digitado: `11.222.333/0001-81` e `11222333000181` virariam fornecedores diferentes |
+| Exclusão de categoria decidida pela chave estrangeira | Não há janela entre "conferir" e "apagar" | Contar produtos antes: outro usuário poderia cadastrar um produto no meio |
+| `DELETE` de fornecedor desativa | Produtos e relatórios vão apontar para ele | Apagar: quebraria o histórico, ou seria bloqueado pela chave estrangeira |
+| `isPrismaError` compartilhado em `common/prisma` | A tradução de erros se repete em todos os services | Copiar a verificação em cada service. O `UsersService` ainda tem a versão antiga e pode migrar depois |
+| Sem auditoria para categorias e fornecedores | O plano (seção 3.2) audita ações sensíveis: preço, estoque, vendas, usuários | Auditar tudo: mais escrita no banco sem valor de investigação |
+
+### Perguntas de entrevista
+
+1. **Como você garante que não existam duas categorias "Bebidas" e "bebidas"?**
+   Com a coluna em `citext` e um `UNIQUE`: o Postgres compara sem diferenciar maiúsculas, e a segunda inserção falha com violação de unicidade, que a API traduz para 409. Conferir antes no código não bastaria, porque dois cadastros simultâneos passariam pela consulta.
+
+2. **O que muda num sistema com o CNPJ alfanumérico?**
+   A validação: as 12 primeiras posições aceitam letras, e o cálculo dos dígitos usa o código ASCII menos 48 de cada caractere. Também o armazenamento: o campo precisa ser texto (`CHAR(14)`), e nunca número. Máscaras, buscas e regex do tipo `\d{14}` precisam ser revistas.
+
+3. **Por que um erro desconhecido do banco não vira 404 ou 409?**
+   Porque a mensagem seria falsa ("não encontrado", "já existe") e o erro real sumiria. O service só traduz os códigos que entende; o resto chega ao filtro global, que responde 500 com mensagem genérica e grava a causa no log com o `requestId`.

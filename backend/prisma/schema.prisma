@@ -92,3 +92,37 @@ model AuditLog {
   @@index([entity, entityId])
   @@map("audit_logs")
 }
+
+// ---------------------------------------------------------------------------
+// Catálogo
+// ---------------------------------------------------------------------------
+
+model Category {
+  id   String @id @default(uuid()) @db.Uuid
+  // citext: compara sem diferenciar maiúsculas. Guarda "Bebidas" como foi
+  // digitado, mas o UNIQUE recusa "bebidas" como categoria nova.
+  name String @unique @db.Citext
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@map("categories")
+}
+
+model Supplier {
+  id       String  @id @default(uuid()) @db.Uuid
+  name     String  @db.VarChar(120)
+  // CNPJ sem máscara, em maiúsculas: 12 posições alfanuméricas + 2 dígitos
+  // verificadores (formato alfanumérico da Receita). Opcional; quando
+  // presente, é único (o UNIQUE do Postgres aceita vários NULL).
+  document String? @unique @db.Char(14)
+  phone    String? @db.VarChar(20)
+  email    String? @db.VarChar(254)
+  active   Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([name])
+  @@map("suppliers")
+}
