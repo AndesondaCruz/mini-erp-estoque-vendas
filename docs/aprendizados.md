@@ -245,3 +245,62 @@ O teste e2e dispara 5 alterações simultâneas e confere que os registros forma
 
 3. **Se o preço final fica certo sem lock, por que travar a linha?**
    Por causa da auditoria. Sem lock, duas alterações simultâneas leem o mesmo preço "antes", e o histórico perde a alteração intermediária. O lock faz a segunda edição esperar e ler o valor já atualizado. Concorrência não é só "não perder dados": também é "não registrar uma história falsa".
+
+## Fase 3: movimentações de estoque
+
+### Conceitos usados
+
+- **Um único ponto de escrita.** Só o `StockService` altera `products.current_stock`, e sempre grava a movimentação na mesma transação. É isso que mantém saldo e histórico iguais (risco 3 do plano). A API de produtos continua recusando `currentStock` (400).
+- **Baixa atômica e condicional (risco 1).** A saída é um comando só: `UPDATE products SET current_stock = current_stock - q WHERE id = ... AND active AND current_stock >= q RETURNING current_stock`. A condição e a escrita acontecem juntas. Duas saídas simultâneas da última unidade: o Postgres serializa os `UPDATE` na mesma linha; a segunda espera a primeira confirmar, reavalia o `WHERE` com o saldo novo (0) e afeta 0 linhas. Nenhum lock explícito.
+- **Descobrir o motivo depois, não decidir depois.** Quando o `UPDATE` afeta 0 linhas, o service lê o produto só para escolher a mensagem: 404 (não existe), 409 "produto inativo" ou 409 "estoque insuficiente" com `details.available`. A decisão de não baixar já foi tomada pelo banco.
+- **Ajuste com lock (risco 4).** O gerente informa quanto contou. O service trava a linha (`SELECT ... FOR UPDATE`), calcula `delta = contado - saldo` e grava. Sem o lock, uma saída entre "ler o saldo" e "gravar o contado" seria apagada do saldo, mas continuaria no histórico. Diferença zero responde 400.
+- **Por que só o ajuste trava.** A saída não precisa ler o saldo para decidir: o `WHERE` decide. O ajuste precisa ler o saldo para calcular a diferença e garantir que ele não mude até gravar.
+- **Quantidade com sinal e `balanceAfter`.** Entrada é positiva e saída negativa. Assim o saldo é sempre `SUM(quantity)`, e cada linha guarda o saldo resultante (extrato legível e ponto de conferência). CHECKs garantem o sinal de cada tipo, quantidade diferente de zero e saldo resultante nunca negativo.
+- **Histórico imutável.** Um trigger recusa `UPDATE` e `DELETE` em `stock_movements`, como na auditoria. Correção de erro é feita com uma nova movimentação (um AJUSTE), nunca editando a antiga.
+- **Métodos que recebem a transação.** `increase`, `decrease` e `adjust` recebem o `tx` de quem chama. A venda (Fase 4) e o cancelamento (Fase 5) vão baixar e estornar estoque dentro da própria transação, reaproveitando as mesmas regras.
+
+### As duas camadas do risco 1, vistas num teste
+
+O teste "5 saídas simultâneas da última unidade" espera `[201, 409, 409, 409, 409]` e saldo final 0. Ele foi conferido nos dois sentidos:
+
+- **Sem a condição `current_stock >= q`:** o teste falhou, mas o saldo **não** ficou negativo. O resultado foi `[201, 500, 500, 500, 500]`: o `CHECK (current_stock >= 0)` do banco barrou as baixas extras. Ou seja, a segunda camada (o CHECK) segurou o estrago quando a primeira (a condição) foi esquecida; só a resposta ao usuário ficou errada (erro interno em vez de "estoque insuficiente").
+- **Sem o `FOR UPDATE` no ajuste:** o teste "ajuste simultâneo a uma saída" falhou nas 3 execuções. A invariante quebrou: saldo e soma das movimentações divergiram.
+
+Com o código original, os dois passam.
+
+### Query de reconciliação (uso operacional)
+
+Lista os produtos cujo saldo não bate com o histórico. O resultado esperado é vazio:
+
+```sql
+SELECT p.id, p.sku, p.current_stock, COALESCE(SUM(m.quantity), 0) AS soma_movimentacoes
+FROM products p
+LEFT JOIN stock_movements m ON m.product_id = p.id
+GROUP BY p.id, p.sku, p.current_stock
+HAVING p.current_stock <> COALESCE(SUM(m.quantity), 0);
+```
+
+Um teste e2e roda essa mesma query depois de uma sequência de movimentações.
+
+### Decisões e alternativas descartadas
+
+| Decisão | Por quê | Alternativa descartada |
+|---|---|---|
+| `UPDATE ... WHERE current_stock >= q` na saída | Condição e escrita num comando atômico; nenhum lock explícito | `SELECT ... FOR UPDATE` e depois `UPDATE`: funciona, mas são dois passos e o lock dura mais. `SERIALIZABLE`: exigiria repetir transações abortadas |
+| Ajuste recebe o contado, não a diferença | O servidor calcula a diferença no momento em que trava a linha | Receber "-2": uma venda simultânea tornaria o número errado sem ninguém perceber |
+| Motivo obrigatório na saída manual | É a movimentação que alguém vai investigar (avaria, perda) | Seguir o plano original (motivo só em AJUSTE e ESTORNO) |
+| Um endpoint com corpo por tipo | Uma rota, como no plano; o campo errado para o tipo responde 400 | Três rotas (`/entries`, `/exits`, `/adjustments`): mais claras, mas fogem do plano |
+| ENTRADA aceita produto inativo; SAIDA não | O plano proíbe só saída de inativo: a mercadoria pode chegar depois da desativação | Bloquear tudo: impediria registrar mercadoria que de fato entrou |
+| Auditoria só para saída manual e ajuste | São as ações sensíveis da seção 3.2 do plano; a entrada já fica no histórico de movimentações | Auditar todas: duplicaria o histórico sem ganho |
+| `saleId` só na Fase 4 | A coluna nasce com chave estrangeira para `sales` | Criar agora sem FK: uma coluna solta, sem garantia de integridade |
+
+### Perguntas de entrevista
+
+1. **Dois vendedores tentam tirar a última unidade ao mesmo tempo. O que acontece?**
+   A baixa é um `UPDATE` condicional (`WHERE current_stock >= quantidade`). O Postgres serializa as duas atualizações na mesma linha: a primeira baixa e confirma; a segunda, ao conseguir a linha, reavalia a condição com o saldo já em 0 e não afeta nenhuma linha. A API responde 409 com o saldo disponível. Como última barreira, um `CHECK (current_stock >= 0)` no banco impede saldo negativo mesmo que algum código esqueça a condição; testei isso removendo a condição de propósito.
+
+2. **Por que a saída não usa lock e o ajuste usa?**
+   A saída não precisa ler o saldo para decidir: a condição no `WHERE` decide e grava no mesmo comando. O ajuste lê o saldo para calcular a diferença ("tinha 9, contei 7: -2") e precisa que ele não mude até gravar; por isso trava a linha com `SELECT ... FOR UPDATE`.
+
+3. **Como você garante que o saldo nunca diverge do histórico?**
+   Três coisas: um único serviço escreve no saldo, sempre na mesma transação da movimentação; o histórico é imutável (trigger); e cada movimentação guarda o saldo resultante. Um teste confere a invariante `saldo = soma das movimentações` e existe uma query de reconciliação para rodar em produção.

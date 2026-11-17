@@ -13,6 +13,7 @@ import { type Env, validateEnv } from './config/env.js';
 import { HealthModule } from './health/health.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
 import { ProductsModule } from './products/products.module.js';
+import { StockModule } from './stock/stock.module.js';
 import { SuppliersModule } from './suppliers/suppliers.module.js';
 
 const REQUEST_ID_HEADER = 'x-request-id';
@@ -94,6 +95,7 @@ const VALID_REQUEST_ID = /^[\w-]{1,64}$/;
     CategoriesModule,
     SuppliersModule,
     ProductsModule,
+    StockModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

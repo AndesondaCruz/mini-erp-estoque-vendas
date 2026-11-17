@@ -77,6 +77,19 @@ Fase 2, parte B (produtos) concluída:
 - Mudança de preço é auditada com o valor antes e depois, sob lock da linha: alterações simultâneas formam um histórico sem buracos
 - Saldo, mínimo e preços nunca negativos, garantidos por CHECK no banco; categoria com produtos não pode ser excluída
 
+Fase 3 (movimentações de estoque) concluída:
+
+| Rota | Quem acessa | Descrição |
+|---|---|---|
+| `POST /api/v1/stock/movements` | ADMIN, GERENTE | ENTRADA e SAIDA com `quantity`; AJUSTE com `countedStock` (o saldo contado). SAIDA e AJUSTE exigem motivo |
+| `GET /api/v1/stock/movements` | ADMIN, GERENTE | Histórico com filtros por produto, tipo, responsável e período |
+| `GET /api/v1/products/:id/movements` | ADMIN, GERENTE | Extrato do produto, do mais recente para o mais antigo |
+
+- Saída com baixa atômica e condicional: duas saídas simultâneas da última unidade nunca passam juntas, e a recusada recebe 409 com o saldo disponível
+- Ajuste de inventário calcula a diferença com a linha do produto travada, então uma saída simultânea não se perde
+- Um único serviço altera o saldo, sempre gravando a movimentação na mesma transação: saldo = soma das movimentações, conferido por teste
+- Histórico imutável (trigger no banco bloqueia alteração e exclusão); saída manual e ajuste vão para a auditoria
+
 ## Stack
 
 - Back-end: NestJS 12, TypeScript 6, Prisma 7, PostgreSQL 16

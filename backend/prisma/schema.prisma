@@ -42,8 +42,9 @@ model User {
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  refreshTokens RefreshToken[]
-  auditLogs     AuditLog[]
+  refreshTokens  RefreshToken[]
+  auditLogs      AuditLog[]
+  stockMovements StockMovement[]
 
   @@map("users")
 }
@@ -153,11 +154,47 @@ model Product {
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
-  category Category  @relation(fields: [categoryId], references: [id], onDelete: Restrict)
-  supplier Supplier? @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  category  Category        @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  supplier  Supplier?       @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  movements StockMovement[]
 
   @@index([categoryId])
   @@index([supplierId])
   @@index([name])
   @@map("products")
+}
+
+// ---------------------------------------------------------------------------
+// Estoque
+// ---------------------------------------------------------------------------
+
+enum StockMovementType {
+  ENTRADA
+  SAIDA
+  AJUSTE
+  ESTORNO
+}
+
+// Imutável: só INSERT. Um trigger no banco bloqueia UPDATE e DELETE.
+// O saldo do produto é sempre a soma de quantity (risco 3 do plano).
+model StockMovement {
+  id           String            @id @default(uuid()) @db.Uuid
+  productId    String            @map("product_id") @db.Uuid
+  type         StockMovementType
+  // Com sinal: positivo soma ao saldo, negativo subtrai.
+  quantity     Int
+  // Saldo do produto logo depois desta movimentação (extrato e conferência).
+  balanceAfter Int               @map("balance_after")
+  reason       String?           @db.VarChar(255)
+  // Responsável pela movimentação.
+  userId       String            @map("user_id") @db.Uuid
+  createdAt    DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([productId, createdAt])
+  @@index([createdAt])
+  @@index([userId, createdAt])
+  @@map("stock_movements")
 }
