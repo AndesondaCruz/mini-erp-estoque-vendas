@@ -323,11 +323,19 @@ Regra de trabalho: uma branch e um PR por feature, título em Conventional Commi
 - CI no GitHub Actions (lint, testes, build) e Dependabot.
 - Repositório criado pelo GitHub com um README inicial, para a main existir sem push direto nela.
 
-**Fase 1: autenticação, usuários e RBAC** (`feat/auth-rbac`)
-- Tabelas `User`, `RefreshToken`; login, refresh com rotação, logout, `me`, troca de senha.
-- `JwtAuthGuard` global, `RolesGuard` com negar por padrão, CRUD de usuários (ADMIN), seed do primeiro ADMIN.
-- Infraestrutura de auditoria (`AuditLog`, `AuditService`) e auditoria de login e gestão de usuários.
-- Ponto para você implementar (modo mentor): o `RolesGuard`, com dica minha e code review depois.
+**Fase 1: autenticação, usuários e RBAC**, dividida em dois PRs:
+
+*Parte A* (`feat/auth`)
+- Tabelas `User`, `RefreshToken` e `AuditLog` (primeira migration, com CHECKs e trigger de auditoria somente inserção).
+- Login, refresh com rotação e detecção de reuso, logout, `me`, troca de senha.
+- `JwtAuthGuard` global com `@Public()`; papel, status e `tokenVersion` lidos do banco a cada requisição.
+- `AuditService` (gravação na mesma transação da ação, lista de campos permitidos).
+- Seed idempotente do primeiro ADMIN; migrations aplicadas pelo entrypoint do container.
+
+*Parte B* (`feat/users-rbac`)
+- `@Roles()` e `RolesGuard` com negar por padrão. Ponto para você implementar (modo mentor): eu escrevo os testes antes, você implementa, eu faço o code review.
+- CRUD de usuários (ADMIN) com a regra do último ADMIN sob lock (`FOR UPDATE`).
+- Desativação e troca de papel revogam sessões e incrementam `tokenVersion`.
 
 **Fase 2: catálogo** (`feat/catalog`)
 - Categorias, fornecedores e produtos, com CHECKs, soft delete, ocultação de `costPrice` para VENDEDOR, auditoria de alteração de preços.
@@ -374,4 +382,11 @@ Segue o padrão do `CLAUDE.md` global: TypeScript strict; validação e tratamen
 3. Hash de senha: argon2 (argon2id).
 4. Fuso padrão dos relatórios: `America/Fortaleza`, configurável por variável de ambiente.
 5. Ordem das fases: back-end de cada feature primeiro, depois o front, como na seção 7.
-6. Repositório no GitHub: público; nome a definir antes da Fase 0.
+6. Repositório no GitHub: público, `mini-erp-estoque-vendas`, com a main protegida (PR e CI obrigatórios, inclusive para administradores) e exclusão automática da branch após o merge.
+
+Decisões da Fase 1 (17/11/2026):
+
+7. Refresh token em cookie `httpOnly`, `SameSite=Strict`, `Path=/api/v1/auth`. Em produção, a Vercel faz proxy de `/api` para o Render, para o front e a API ficarem no mesmo site e o cookie `Strict` funcionar. Alternativa descartada: token no corpo e no `localStorage`, que qualquer XSS conseguiria ler.
+8. Fase 1 dividida em dois PRs (autenticação; usuários e RBAC).
+9. JWT com `@nestjs/jwt` e guard próprio. Descartados: Passport (camada extra sem ganho aqui) e `@nestjs/authentication` (versão 0.1.x, recém-publicado e muito mais amplo que o necessário).
+10. argon2id com os parâmetros mínimos da OWASP (19 MiB, t=2, p=1), e não o padrão da biblioteca (64 MiB), por causa do limite de memória do container. Hashes antigos são atualizados no login.

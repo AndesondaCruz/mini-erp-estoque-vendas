@@ -44,6 +44,19 @@ export const envSchema = z.object({
     .default('info'),
   THROTTLE_TTL_MS: z.coerce.number().int().positive().default(60_000),
   THROTTLE_LIMIT: z.coerce.number().int().positive().default(100),
+  // Limite mais rígido para rotas sensíveis (login): contra força bruta.
+  STRICT_THROTTLE_TTL_MS: z.coerce.number().int().positive().default(60_000),
+  STRICT_THROTTLE_LIMIT: z.coerce.number().int().positive().default(5),
+  // Quantos proxies confiáveis existem na frente da API (Render, Vercel).
+  // Com 0, req.ip é o IP da conexão; atrás de proxy, seria o IP do proxy.
+  TRUST_PROXY: z.coerce.number().int().min(0).default(0),
+
+  // Segredo do access token: no mínimo 32 caracteres (256 bits para HS256).
+  JWT_ACCESS_SECRET: z
+    .string()
+    .min(32, 'JWT_ACCESS_SECRET deve ter pelo menos 32 caracteres'),
+  JWT_ACCESS_TTL_SECONDS: z.coerce.number().int().positive().default(900),
+  REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().positive().default(7),
 });
 
 export type Env = z.infer<typeof envSchema>;

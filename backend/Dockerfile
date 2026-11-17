@@ -18,10 +18,13 @@ FROM deps AS build
 COPY . .
 RUN npm run build
 
-# 3) Só dependências de produção (o client já foi gerado e compilado em dist/)
+# 3) Só dependências de produção. Os scripts de instalação rodam aqui, dentro
+#    do Alpine, para o Prisma baixar o motor de migrations da plataforma certa
+#    (musl). Um binário copiado do host (glibc) não funcionaria.
 FROM base AS prod-deps
-COPY package.json package-lock.json ./
-RUN npm ci --omit=dev --ignore-scripts
+COPY package.json package-lock.json prisma.config.ts ./
+COPY prisma ./prisma
+RUN npm ci --omit=dev
 
 # 4) Imagem final
 FROM node:22-alpine AS runtime
@@ -29,8 +32,11 @@ WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=prod-deps --chown=node:node /app/node_modules ./node_modules
 COPY --from=build --chown=node:node /app/dist ./dist
-COPY --chown=node:node package.json ./
+COPY --chown=node:node package.json prisma.config.ts docker-entrypoint.sh ./
+COPY --chown=node:node prisma ./prisma
+RUN chmod +x docker-entrypoint.sh
 # Nunca rodar como root dentro do container.
 USER node
 EXPOSE 3000
+ENTRYPOINT ["./docker-entrypoint.sh"]
 CMD ["node", "dist/main.js"]
