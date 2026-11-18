@@ -304,3 +304,46 @@ Um teste e2e roda essa mesma query depois de uma sequência de movimentações.
 
 3. **Como você garante que o saldo nunca diverge do histórico?**
    Três coisas: um único serviço escreve no saldo, sempre na mesma transação da movimentação; o histórico é imutável (trigger); e cada movimentação guarda o saldo resultante. Um teste confere a invariante `saldo = soma das movimentações` e existe uma query de reconciliação para rodar em produção.
+
+## Fase 4: vendas
+
+### Conceitos usados
+
+- **Transação "tudo ou nada".** A venda, os itens, as baixas de estoque e a auditoria são gravados numa única `$transaction`. Se o terceiro item não tem saldo, o `StockService` lança 409 e o Postgres desfaz tudo, inclusive as baixas dos dois primeiros itens. Nenhum código de "desfazer" foi escrito à mão.
+- **Reaproveitar a regra da Fase 3.** A venda chama `StockService.decreaseReturningPrices(tx, ...)` para cada item, dentro da própria transação. A baixa atômica continua existindo num lugar só.
+- **Ordem fixa de travamento (risco 2).** Os itens são ordenados por `productId` antes das baixas. Uma venda de [A, B] e outra de [B, A] passam a travar A antes de B: uma espera a outra, em vez de cada uma segurar um produto e esperar o outro para sempre.
+- **Snapshot de preço (risco 6).** O `UPDATE` que baixa o estoque devolve `sale_price` e `cost_price` no `RETURNING`. O preço gravado no item é o que estava valendo no instante da baixa, e a linha fica travada até a venda terminar. O cliente nunca envia preço: `unitPrice` no corpo responde 400.
+- **Idempotência (risco 5).** O front gera um UUID por tentativa de venda e envia no header `Idempotency-Key`. A coluna é única. Retry com a mesma chave, do mesmo vendedor e com os mesmos itens devolve a venda existente (200). Se dois envios chegam juntos, o segundo espera no índice único, recebe P2002, a transação dele é desfeita por inteiro e a API devolve a venda do primeiro.
+- **IDOR (risco 8).** "Só as próprias vendas" vem do token (`actor.id`), nunca de parâmetro: um VENDEDOR que manda `?sellerId=outro` continua vendo só as dele. Pedir a venda de outra pessoa responde 404, e não 403, para não confirmar que aquele id existe.
+- **Status HTTP decidido pelo service.** O controller responde 201 quando a venda foi criada e 200 quando é um retry. O service devolve `{ sale, created }`, e o controller ajusta o status com `@Res({ passthrough: true })`.
+
+### Testes de concorrência conferidos nos dois sentidos
+
+- **Vendas cruzadas [A, B] e [B, A], 10 rodadas:** sem a ordenação por `productId`, uma das vendas recebeu 500, e o log do Postgres registrou `ERROR: deadlock detected`. O Postgres detecta o ciclo e aborta uma das transações; a outra segue. Com a ordenação, todas as rodadas dão `[201, 201]`.
+- **5 envios simultâneos com a mesma chave:** sem a recuperação do P2002, os perdedores da corrida receberam erro em vez da venda existente. Com ela: `[200, 200, 200, 200, 201]`, uma venda e uma baixa.
+
+Também passam: 5 vendas simultâneas da última unidade (1 sucesso, 4 respostas 409) e a query de reconciliação depois de vendas simultâneas (nenhum produto com saldo diferente do histórico).
+
+### Decisões e alternativas descartadas
+
+| Decisão | Por quê | Alternativa descartada |
+|---|---|---|
+| Gravar a venda antes das baixas | O índice único da chave funciona como fila: o duplicado falha antes de travar produtos | Gravar a venda no fim: o duplicado baixaria estoque e só falharia na última etapa (o rollback corrigiria, mas com locks à toa) |
+| Preço lido no `RETURNING` da baixa | Um comando confere saldo, baixa e lê o preço | `SELECT` do preço separado: abriria uma janela para o preço mudar no meio da venda |
+| Ordenar itens por `productId` | Elimina o ciclo de espera que causa deadlock | Tentar de novo quando der deadlock: funciona, mas trata o sintoma |
+| Recusar produto repetido em dois itens (400) | Simples e explícito; também protege o `UNIQUE (sale_id, product_id)` | Somar as quantidades em silêncio |
+| `Idempotency-Key` obrigatória | Sem ela, um duplo clique cria duas vendas | Opcional: o front esqueceria em algum fluxo |
+| Chave reutilizada com outro conteúdo: 409 | É erro do cliente; devolver a venda antiga esconderia o problema | Devolver a venda antiga mesmo assim |
+| Número sequencial com possíveis buracos | O `SERIAL` do Postgres não volta atrás no rollback; buraco é aceitável para número de balcão | Sequência sem buracos: exigiria lock numa tabela de contador, serializando todas as vendas |
+| Campos de cancelamento já criados, com CHECK | A Fase 5 só passa a usá-los; o CHECK já garante "os três juntos, só em venda cancelada" | Criar na Fase 5: mais uma migration alterando uma tabela já em uso |
+
+### Perguntas de entrevista
+
+1. **Como você evita deadlock numa venda com vários itens?**
+   Toda venda baixa os produtos na mesma ordem (por `productId`). Deadlock precisa de um ciclo: A espera B enquanto B espera A. Com uma ordem global, quem pegou o primeiro produto sempre consegue o segundo, e a outra transação só espera. Testei sem a ordenação: o Postgres detectou o deadlock e abortou uma das vendas.
+
+2. **O cliente clica duas vezes em "Confirmar venda". O que acontece?**
+   O front manda a mesma `Idempotency-Key` nas duas requisições. A primeira cria a venda; a segunda encontra a chave (ou perde a corrida no índice único e tem a transação desfeita) e recebe a mesma venda com status 200. Estoque baixado uma vez só. Se a mesma chave chegar com itens diferentes, é erro do cliente: 409.
+
+3. **Por que o preço não vem do front, se o front já mostra o total?**
+   Porque qualquer um pode chamar a API com `unitPrice: 0.01`. O servidor lê o preço do banco, no mesmo comando que baixa o estoque, e grava uma cópia no item da venda. O total mostrado no front é só informativo; o que vale é o calculado no servidor com `Decimal`.

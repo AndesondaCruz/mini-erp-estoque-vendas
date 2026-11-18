@@ -70,7 +70,7 @@ describe('Movimentações de estoque (e2e)', () => {
 
   beforeEach(async () => {
     await prisma.$executeRawUnsafe(
-      'TRUNCATE TABLE stock_movements, products, categories, audit_logs',
+      'TRUNCATE TABLE sale_items, stock_movements, sales, products, categories, audit_logs',
     );
     categoryId = (await prisma.category.create({ data: { name: 'Geral' } })).id;
   });

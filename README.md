@@ -90,6 +90,20 @@ Fase 3 (movimentações de estoque) concluída:
 - Um único serviço altera o saldo, sempre gravando a movimentação na mesma transação: saldo = soma das movimentações, conferido por teste
 - Histórico imutável (trigger no banco bloqueia alteração e exclusão); saída manual e ajuste vão para a auditoria
 
+Fase 4 (vendas) concluída:
+
+| Rota | Quem acessa | Descrição |
+|---|---|---|
+| `POST /api/v1/sales` | todos | Registra uma venda com vários itens. Exige o header `Idempotency-Key` (UUID) |
+| `GET /api/v1/sales` | todos | ADMIN e GERENTE veem todas; VENDEDOR só as próprias. Filtros por período, status e vendedor |
+| `GET /api/v1/sales/:id` | todos | Detalhe; para o VENDEDOR, a venda de outra pessoa responde 404 |
+
+- Todos os itens são baixados numa única transação: se um item não tem saldo, a venda inteira é desfeita e a API responde 409 com o produto e o saldo disponível
+- O preço vem sempre do banco, nunca do cliente, e fica copiado na venda: mudar o preço depois não altera vendas registradas
+- Os itens são baixados sempre na mesma ordem, o que evita deadlock entre vendas simultâneas com os mesmos produtos em ordens diferentes
+- Repetir a requisição com a mesma `Idempotency-Key` (duplo clique, retry de rede) devolve a venda já criada, sem baixar o estoque de novo
+- O VENDEDOR não vê o custo dos itens; cada venda vai para a auditoria
+
 ## Stack
 
 - Back-end: NestJS 12, TypeScript 6, Prisma 7, PostgreSQL 16
