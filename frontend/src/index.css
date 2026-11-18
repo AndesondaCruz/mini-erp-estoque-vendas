@@ -1,0 +1,7 @@
+@import 'tailwindcss';
+
+/* Foco sempre visível para quem navega pelo teclado. */
+:focus-visible {
+  outline: 2px solid var(--color-indigo-600);
+  outline-offset: 2px;
+}

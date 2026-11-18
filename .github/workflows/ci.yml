@@ -2,7 +2,8 @@
 #
 # Roda em todo Pull Request para a main e em todo push na main.
 # Um PR só é mergeado com tudo verde: formato, lint, tipos, testes
-# unitários, testes e2e (com Postgres real), build, auditoria e Docker.
+# unitários, testes e2e (com Postgres real), build, auditoria e Docker,
+# para o back-end e para o front-end (jobs em paralelo).
 name: CI
 
 on:
@@ -82,6 +83,50 @@ jobs:
 
       - name: Testes e2e (Postgres real)
         run: npm run test:e2e
+
+      - name: Build
+        run: npm run build
+
+      - name: Auditoria de dependências de produção
+        run: npm audit --omit=dev --audit-level=high
+
+  frontend:
+    name: Frontend (React)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node (versão do .nvmrc)
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Atualizar npm
+        run: npm install -g npm@11
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Formatação (Prettier)
+        run: npm run format:check
+
+      - name: Lint (oxlint, com regras de acessibilidade)
+        run: npm run lint
+
+      - name: Tipagem (tsc)
+        run: npm run typecheck
+
+      - name: Testes (Testing Library, MSW e axe-core)
+        run: npm test
 
       - name: Build
         run: npm run build

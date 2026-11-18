@@ -128,13 +128,21 @@ Fase 6 (alertas e relatórios) concluída. Com ela, o back-end do MVP está comp
 - Os relatórios consideram só vendas concluídas: vender e cancelar não altera os números
 - Agregações feitas no SQL, com o fuso e o agrupamento passados como parâmetros da consulta
 
+Fase 7 (base do front-end) concluída:
+
+- React + Vite, com login, sessão restaurada ao recarregar a página e saída
+- Access token só em memória (nunca no `localStorage`); o refresh token continua no cookie `httpOnly`
+- Renovação automática do token quando ele expira: várias chamadas com 401 ao mesmo tempo disparam uma única renovação
+- Menu e rotas por papel (a tela de "sem permissão" é só experiência: quem protege os dados é a API)
+- Erros da API com a mensagem e o código da requisição, para o suporte
+- As telas de produtos, estoque, vendas, relatórios e usuários chegam nas Fases 8 e 9
+
 ## Stack
 
 - Back-end: NestJS 12, TypeScript 6, Prisma 7, PostgreSQL 16
-- Testes: Vitest e Supertest
+- Front-end: React 19, Vite 8, TypeScript 6, React Router, TanStack Query, React Hook Form + zod, Tailwind 4
+- Testes: Vitest e Supertest (API); Testing Library, MSW e axe-core (front)
 - Infraestrutura: Docker Compose, GitHub Actions, Dependabot
-
-O front-end (React, TanStack Query e Tailwind) entra a partir da Fase 7.
 
 ## Como rodar
 
@@ -171,6 +179,16 @@ npm run seed                     # cria o ADMIN definido em SEED_ADMIN_* no .env
 npm run start:dev
 ```
 
+Em outro terminal, o front-end (com a API rodando na porta 3000):
+
+```bash
+cd frontend
+npm ci
+npm run dev                      # http://localhost:5173
+```
+
+O Vite repassa as chamadas `/api` para a API (`VITE_API_PROXY_TARGET`, padrão `http://localhost:3000`). Assim o front e a API ficam na mesma origem, e o cookie de refresh (`SameSite=Strict`) funciona.
+
 Para gerar um `JWT_ACCESS_SECRET` próprio:
 `node -e "console.log(require('node:crypto').randomBytes(48).toString('base64url'))"`
 
@@ -184,6 +202,16 @@ npm run lint
 npm run typecheck
 npm test            # unitários
 npm run test:e2e    # e2e, usa o banco mini_erp_test
+npm run build
+```
+
+Dentro de `frontend/` (não precisa da API: os testes usam uma API simulada com MSW):
+
+```bash
+npm run format:check
+npm run lint        # inclui regras de acessibilidade (jsx-a11y)
+npm run typecheck
+npm test            # Testing Library + axe-core
 npm run build
 ```
 

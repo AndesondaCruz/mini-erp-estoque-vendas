@@ -1,6 +1,5 @@
 # Dependabot: abre PRs semanais com atualizações de dependências.
 # Cada PR passa pelo CI antes do merge, então atualizar fica seguro.
-# O diretório /frontend entra aqui na Fase 7, quando ele existir.
 version: 2
 updates:
   - package-ecosystem: npm
@@ -25,6 +24,20 @@ updates:
       # Os tipos do Node acompanham a versão do runtime (Node 22, ver .nvmrc).
       - dependency-name: '@types/node'
         update-types: [version-update:semver-major]
+
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # react, react-dom e os tipos precisam andar juntos.
+      react:
+        patterns: ['react', 'react-dom', '@types/react', '@types/react-dom']
+      testes:
+        patterns: ['vitest', 'jsdom', '@testing-library/*']
+      minor-and-patch:
+        update-types: [minor, patch]
 
   - package-ecosystem: docker
     directory: /backend
