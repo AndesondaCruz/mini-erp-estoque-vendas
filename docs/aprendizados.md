@@ -383,3 +383,42 @@ O teste dispara 5 cancelamentos simultâneos da mesma venda e espera `[200, 409,
 
 3. **O que acontece com o estoque se o produto foi desativado depois da venda?**
    Volta mesmo assim. Desativar impede vender e dar saída, mas a mercadoria do cancelamento voltou fisicamente para a loja. O estorno usa o `increase` do `StockService`, que não exige produto ativo, e grava uma movimentação ESTORNO ligada à venda.
+
+## Fase 6: alertas e relatórios
+
+### Conceitos usados
+
+- **Fuso horário nos relatórios (risco 11).** Tudo é gravado em UTC (`timestamptz`). O período chega em datas de calendário da loja e vira um intervalo UTC no próprio SQL: `created_at >= (from::date::timestamp AT TIME ZONE tz)` e `created_at < ((to::date + 1)::timestamp AT TIME ZONE tz)`. O agrupamento também é feito no fuso da loja: `date_trunc('day', created_at AT TIME ZONE tz)`. Exemplo: a venda das 23h30 do dia 17 em Fortaleza é 02h30 UTC do dia 18, mas conta no dia 17.
+- **As duas direções do `AT TIME ZONE`.** Em `timestamptz AT TIME ZONE 'America/Fortaleza'`, o resultado é o horário de parede em Fortaleza (sem fuso). Em `timestamp AT TIME ZONE 'America/Fortaleza'`, o horário de parede é interpretado como de Fortaleza e vira um instante (`timestamptz`). A consulta usa as duas: uma para agrupar, outra para montar os limites.
+- **Períodos zerados com `generate_series`.** Uma CTE gera todos os dias (ou semanas, ou meses) do intervalo, e um `LEFT JOIN` com os totais deixa zerados os que não tiveram venda. O gráfico do front não precisa inventar dias.
+- **Agregação no banco.** `SUM`, `COUNT` e `date_trunc` rodam no Postgres. Trazer as vendas para somar em JavaScript seria mais lento e usaria `number` para dinheiro.
+- **SQL cru com parâmetros.** As consultas usam `$queryRaw` com template tagged: o fuso, o `groupBy`, as datas e o `limit` viram parâmetros (`$1`, `$2`...), nunca texto concatenado. O `groupBy` já passou pela lista de valores permitidos do DTO antes de chegar ali.
+- **Validação de data real.** `"2026-02-30"` passa numa regex `AAAA-MM-DD` e o `Date` do JavaScript transforma em 2 de março. A validação confere que a data reconvertida é igual à digitada.
+- **Alerta calculado na consulta (risco 13).** Não existe tabela de alertas: a lista é `current_stock <= min_stock` entre produtos ativos, calculada a cada requisição. Nunca fica desatualizada; o teste confirma que uma venda faz o produto aparecer no alerta na hora.
+
+### Conferido nos dois sentidos
+
+O teste "venda às 23h30 em Fortaleza conta no dia local" foi rodado com `REPORTS_TIMEZONE=UTC`: falhou, porque as duas vendas caíram no dia 18. Com o fuso padrão, passa. O teste prova que o fuso é de fato aplicado, e que trocar a variável de ambiente muda o resultado.
+
+### Decisões e alternativas descartadas
+
+| Decisão | Por quê | Alternativa descartada |
+|---|---|---|
+| Datas de calendário em `from`/`to`, convertidas no SQL | Quem pede "1 a 30 de novembro" pensa em dias da loja; o front não precisa acertar o fuso | Receber instantes ISO: cada cliente teria de calcular o fim do dia em Fortaleza |
+| Fuso configurável (`REPORTS_TIMEZONE`) | Outra loja, outro fuso, sem mudar código; validado no boot | Fuso fixo no código |
+| Períodos vazios zerados no SQL | Gráfico correto sem lógica no front | Devolver só os dias com venda |
+| Só vendas `CONCLUIDA` | Venda cancelada não é receita | Contar tudo e mostrar canceladas à parte (pode virar próximo passo) |
+| Valor do estoque inclui produtos desativados | A mercadoria continua fisicamente na loja | Só ativos: o valor ficaria menor que o real |
+| Limite de 366 dias por consulta | Evita consultas enormes e gráficos ilegíveis | Sem limite |
+| Sem tabela de alertas | Calculado na hora, nunca desatualizado | Tabela atualizada por trigger: mais código para o mesmo resultado; vira otimização se houver milhares de produtos |
+
+### Perguntas de entrevista
+
+1. **Como você garante que a venda das 23h aparece no dia certo do relatório?**
+   O banco guarda tudo em UTC. O relatório recebe datas da loja e converte no SQL com `AT TIME ZONE` usando o fuso configurado (`America/Fortaleza`), tanto para montar o intervalo quanto para agrupar por dia. Há um teste com vendas às 23h30 e às 00h30 que só passa com o fuso aplicado; rodei com `UTC` para confirmar que ele falha.
+
+2. **Por que somar no SQL e não no código?**
+   O banco já tem os dados e índices; trazer milhares de linhas para somar em JavaScript é mais lento e usa `number` (ponto flutuante) para dinheiro. No Postgres, `SUM` sobre `DECIMAL` é exato, e a API só formata o resultado.
+
+3. **O SQL desses relatórios é cru. Isso não abre brecha para injeção?**
+   Não, porque nada é concatenado: o `$queryRaw` com template tagged transforma cada valor interpolado em parâmetro da consulta. Além disso, o `groupBy` é validado contra uma lista fixa (`day`, `week`, `month`) antes de chegar ao SQL, e as datas passam por validação de formato e de data real.

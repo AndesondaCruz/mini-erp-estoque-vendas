@@ -418,3 +418,11 @@ Decisões da Fase 5 (18/11/2026):
 
 24. Cancelar responde 200 com a venda atualizada (e não 204), para o front mostrar quem cancelou e quando sem uma segunda requisição.
 25. O estorno usa o motivo do cancelamento como `reason` de cada movimentação ESTORNO, além do `saleId`: o extrato do produto explica por que o estoque voltou.
+
+Decisões da Fase 6 (18/11/2026):
+
+26. `from` e `to` dos relatórios são datas de calendário (AAAA-MM-DD), as duas inclusivas, no fuso da loja. O SQL converte para o intervalo UTC `[from 00:00, to + 1 dia 00:00)`. Período máximo de 366 dias.
+27. O relatório de vendas devolve todos os períodos do intervalo, inclusive os sem venda (zerados, via `generate_series`).
+28. O valor do estoque conta todos os produtos com saldo, inclusive os desativados (a mercadoria continua na loja), e informa quantos estão desativados.
+29. O alerta de estoque mínimo usa a mesma regra do filtro `lowStock` de produtos (`current_stock <= min_stock`), só para produtos ativos, ordenado pela maior falta. Trade-off: um produto com mínimo 0 e saldo 0 aparece no alerta; definir mínimo maior que zero é a forma de dizer "quero ser avisado".
+30. Semana começa na segunda-feira (padrão ISO do `date_trunc` do Postgres).
