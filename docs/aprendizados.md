@@ -503,3 +503,42 @@ O teste "venda às 23h30 em Fortaleza conta no dia local" foi rodado com `REPORT
 
 3. **Se o VENDEDOR abrir o DevTools e mostrar a coluna de custo, ele vê o custo?**
    Não. A coluna escondida é só experiência: o back-end nem manda o `costPrice` para o VENDEDOR. Nos testes, o mock da API também omite o campo para esse papel, e um teste falha se a coluna aparecer.
+
+## Fase 8b: telas de estoque
+
+### Conceitos usados
+
+- **União discriminada no zod.** `z.discriminatedUnion('type', [entrada, saida, ajuste])` escolhe o schema pelo valor do campo `type`. Cada tipo tem as próprias regras: a ENTRADA tem motivo opcional, a SAÍDA exige motivo, e o AJUSTE usa `countedStock` no lugar de `quantity`. É o mesmo contrato do `@ValidateIf` no DTO do back-end, agora checado antes da requisição. Como o `z.object` descarta chaves desconhecidas, a quantidade digitada antes de trocar para Ajuste não vai para a API.
+- **Formulário com dados de vários tipos.** O `useForm` guarda todos os campos como texto (`FormValues`) e o schema entrega o corpo já convertido (`FormOutput`). Trocar de tipo não perde o que foi digitado. O cast no `zodResolver` existe porque nenhum ramo da união aceita sozinho todos esses campos.
+- **Erro da API com dados úteis.** O 409 de estoque insuficiente traz `details.available`. A tela mostra "Disponível agora: N" e busca o produto de novo, porque o saldo mudou depois que a tela foi aberta.
+- **Datas sem fuso viram instantes.** O `<input type="date">` dá "2026-11-15", sem hora. `startOfDayIso` e `endOfDayExclusiveIso` convertem para ISO usando o fuso do navegador, e o "até" vira o início do dia seguinte, porque o `to` da API é exclusivo.
+- **Cache do React Query.** Ao voltar do histórico de um produto para o extrato geral, nenhuma requisição é feita: a `queryKey` já estava em cache e ainda não tinha passado do `staleTime`. Depois de lançar uma movimentação, as chaves `stock-movements`, `products` e `stock-alerts` são invalidadas juntas, porque as três dependem do saldo.
+- **Sinal além da cor.** No extrato, a quantidade aparece como "+4" ou "-2", e não só em verde ou vermelho: a cor sozinha não chega a quem não distingue cores nem ao leitor de tela.
+
+### Conferido nos dois sentidos
+
+- **Fim exclusivo:** sem somar um dia em `endOfDayExclusiveIso`, o teste "até inclui o dia inteiro" falhou.
+- **Saldo disponível no 409:** ignorando o `details` (`status !== 410` no lugar de 409), o teste "SAÍDA maior que o saldo" falhou.
+- **Contra a API real:** pelo proxy do Vite, ENTRADA sem motivo (201), SAÍDA acima do saldo (409 com `details.available`), AJUSTE (201, quantidade calculada pelo servidor), AJUSTE sem diferença (400), AJUSTE com `quantity` junto (400, o caso que o zod evita), histórico por produto com período e tipo, produto inexistente (404) e alertas ordenados pela maior falta.
+
+### Decisões e alternativas descartadas
+
+| Decisão | Por quê | Alternativa descartada |
+|---|---|---|
+| `discriminatedUnion` por tipo | Regras por tipo num lugar só, iguais às do DTO | `superRefine` com vários `if` |
+| Campos de todos os tipos no formulário | Trocar de tipo não apaga o que foi digitado | `reset` a cada troca de tipo |
+| Busca de produto com rádio | Acessível sem código extra | Combobox ARIA próprio |
+| Prévia do ajuste no navegador | A pessoa confere antes de gravar | Só mostrar o resultado depois |
+| Extrato por produto na mesma tela (`?produto=`) | Filtros e paginação reaproveitados | Uma tela separada de histórico |
+| Alertas na tela inicial, top 5 | A API já ordena pela maior falta | Mais uma tela só de alertas |
+
+### Perguntas de entrevista
+
+1. **Por que validar no front se o back-end já valida?**
+   Por experiência: o erro aparece no campo, antes da requisição. A regra que vale continua sendo a do back-end, que recebe chamadas de qualquer cliente. O schema do front é uma cópia do contrato, e os testes com o mock e as chamadas contra a API real conferem que as duas versões concordam.
+
+2. **Duas pessoas lançam uma saída do mesmo produto ao mesmo tempo. O que a tela mostra?**
+   O back-end trava a linha do produto e a segunda saída, se passar do saldo, recebe 409 com o saldo disponível. A tela mostra "Disponível agora: N" e busca o produto de novo. A prévia do ajuste também é só informativa: o servidor recalcula a diferença dentro da transação.
+
+3. **Por que o filtro "até 15/11" manda 16/11 para a API?**
+   Porque o `to` da API é exclusivo (`createdAt < to`). Mandar 15/11 00:00 deixaria o dia 15 inteiro de fora. Um intervalo meio aberto evita a dúvida sobre "23:59:59.999" e encaixa períodos seguidos sem sobreposição.

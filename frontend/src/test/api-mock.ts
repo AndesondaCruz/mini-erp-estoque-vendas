@@ -5,6 +5,7 @@ import type {
   Category,
   Product,
   Role,
+  StockMovement,
   Supplier,
   User,
 } from '../lib/types';
@@ -47,9 +48,9 @@ function issue(user: User): AuthResponse {
   };
 }
 
-const apiError = (status: number, message: string) =>
+const apiError = (status: number, message: string, details?: unknown) =>
   HttpResponse.json(
-    { statusCode: status, message, requestId: 'req-teste-123' },
+    { statusCode: status, message, details, requestId: 'req-teste-123' },
     { status },
   );
 
@@ -76,14 +77,28 @@ export const handlers = [
     mockState.validToken = null;
     return new HttpResponse(null, { status: 204 });
   }),
+  // Alertas calculados do catálogo, como no back-end: ativos com saldo <=
+  // mínimo, pela maior falta.
   http.get('*/api/v1/stock/alerts', ({ request }) => {
     if (!authorized(request)) return apiError(401, 'Token inválido');
-    return HttpResponse.json({
-      data: [],
-      meta: { page: 1, pageSize: 1, total: 3, totalPages: 3 },
-    });
+    const alerts = catalog.products
+      .filter((p) => p.active && p.currentStock <= p.minStock)
+      .map((p) => ({
+        id: p.id,
+        sku: p.sku,
+        name: p.name,
+        category: catalog.categories.find((c) => c.id === p.categoryId)!,
+        currentStock: p.currentStock,
+        minStock: p.minStock,
+        shortage: p.minStock - p.currentStock,
+      }))
+      .sort((a, b) => b.shortage - a.shortage);
+    return HttpResponse.json(
+      paginate(alerts, new URL(request.url).searchParams),
+    );
   }),
   ...catalogHandlers(),
+  ...stockHandlers(),
 ];
 
 export const server = setupServer(...handlers);
@@ -109,13 +124,18 @@ export const catalog: {
   categories: Category[];
   suppliers: Supplier[];
   products: StoredProduct[];
+  movements: StockMovement[];
   /** Última query string e último corpo recebidos, para os testes conferirem. */
   lastQuery: URLSearchParams | null;
+  /** Último caminho de listagem chamado (ex.: /products/x/movements). */
+  lastPath: string | null;
   lastBody: unknown;
 } = {
   categories: [],
   suppliers: [],
   products: [],
+  movements: [],
+  lastPath: null,
   lastQuery: null,
   lastBody: null,
 };
@@ -171,7 +191,34 @@ function resetCatalog(): void {
       active: true,
     },
   ];
+  catalog.movements = [
+    {
+      id: 'mov-1',
+      product: {
+        id: 'prod-cerveja',
+        sku: 'CER-350',
+        name: 'Cerveja lata 350 ml',
+      },
+      type: 'ENTRADA',
+      quantity: 4,
+      balanceAfter: 4,
+      reason: null,
+      user: { id: 'gerente-1', name: 'Pessoa GERENTE' },
+      createdAt: '2026-11-10T12:00:00.000Z',
+    },
+    {
+      id: 'mov-2',
+      product: { id: 'prod-sabao', sku: 'SAB-1KG', name: 'Sabão em pó 1 kg' },
+      type: 'SAIDA',
+      quantity: -2,
+      balanceAfter: 20,
+      reason: 'Embalagem rasgada',
+      user: { id: 'admin-1', name: 'Pessoa ADMIN' },
+      createdAt: '2026-11-15T12:00:00.000Z',
+    },
+  ];
   catalog.lastQuery = null;
+  catalog.lastPath = null;
   catalog.lastBody = null;
 }
 resetCatalog();
@@ -383,6 +430,110 @@ function catalogHandlers() {
       if (!product) return apiError(404, 'Produto não encontrado');
       product.active = false;
       return new HttpResponse(null, { status: 204 });
+    }),
+  ];
+}
+
+// ---------------------------------------------------------------------------
+// Movimentações. Mesmas regras do StockService: saída não passa do saldo
+// (409 com details.available), produto inativo não tem saída, ajuste sem
+// diferença é 400. O saldo do produto muda junto.
+
+function stockHandlers() {
+  const MANAGERS: Role[] = ['ADMIN', 'GERENTE'];
+  const guard = (request: Request) => {
+    if (!authorized(request)) return apiError(401, 'Token inválido');
+    if (!MANAGERS.includes(mockState.session!.role)) {
+      return apiError(403, 'Você não tem permissão para esta ação');
+    }
+    return null;
+  };
+
+  function list(request: Request, productId?: string) {
+    const url = new URL(request.url);
+    catalog.lastQuery = url.searchParams;
+    catalog.lastPath = url.pathname.replace('/api/v1', '');
+    const q = url.searchParams;
+    const from = q.get('from');
+    const to = q.get('to');
+    const items = catalog.movements
+      .filter((m) => !productId || m.product.id === productId)
+      .filter((m) => !q.get('type') || m.type === q.get('type'))
+      .filter((m) => !from || m.createdAt >= new Date(from).toISOString())
+      .filter((m) => !to || m.createdAt < new Date(to).toISOString())
+      .sort((a, b) =>
+        q.get('order') === 'asc'
+          ? a.createdAt.localeCompare(b.createdAt)
+          : b.createdAt.localeCompare(a.createdAt),
+      );
+    return HttpResponse.json(paginate(items, q));
+  }
+
+  return [
+    http.get('*/api/v1/stock/movements', ({ request }) => {
+      return guard(request) ?? list(request);
+    }),
+    http.get('*/api/v1/products/:id/movements', ({ request, params }) => {
+      const denied = guard(request);
+      if (denied) return denied;
+      if (!catalog.products.some((p) => p.id === params.id)) {
+        return apiError(404, 'Produto não encontrado');
+      }
+      return list(request, params.id as string);
+    }),
+    http.post('*/api/v1/stock/movements', async ({ request }) => {
+      const denied = guard(request);
+      if (denied) return denied;
+      const dto = (await request.json()) as {
+        productId: string;
+        type: 'ENTRADA' | 'SAIDA' | 'AJUSTE';
+        quantity?: number;
+        countedStock?: number;
+        reason?: string;
+      };
+      catalog.lastBody = dto;
+      const product = catalog.products.find((p) => p.id === dto.productId);
+      if (!product) return apiError(404, 'Produto não encontrado');
+
+      let delta: number;
+      if (dto.type === 'ENTRADA') {
+        delta = dto.quantity!;
+      } else if (dto.type === 'SAIDA') {
+        if (!product.active) {
+          return apiError(409, 'Produto inativo não pode ter saída');
+        }
+        if (dto.quantity! > product.currentStock) {
+          return apiError(409, 'Estoque insuficiente', {
+            productId: product.id,
+            requested: dto.quantity,
+            available: product.currentStock,
+          });
+        }
+        delta = -dto.quantity!;
+      } else {
+        delta = dto.countedStock! - product.currentStock;
+        if (delta === 0) {
+          return apiError(
+            400,
+            `O saldo já é ${dto.countedStock}: não há diferença para ajustar`,
+          );
+        }
+      }
+
+      product.currentStock += delta;
+      product.lowStock = product.currentStock <= product.minStock;
+      const movement: StockMovement = {
+        id: newId('mov'),
+        product: { id: product.id, sku: product.sku, name: product.name },
+        type: dto.type,
+        quantity: delta,
+        balanceAfter: product.currentStock,
+        reason: dto.reason ?? null,
+        user: { id: mockState.session!.id, name: mockState.session!.name },
+        createdAt: new Date().toISOString(),
+      };
+      catalog.movements.push(movement);
+      return HttpResponse.json(movement, { status: 201 });
     }),
   ];
 }

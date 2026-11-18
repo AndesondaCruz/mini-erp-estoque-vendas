@@ -53,6 +53,40 @@ export interface Product {
   active: boolean;
 }
 
+export type StockMovementType = 'ENTRADA' | 'SAIDA' | 'AJUSTE' | 'ESTORNO';
+/** ESTORNO só nasce do cancelamento de venda: não é lançado à mão. */
+export type ManualMovementType = Exclude<StockMovementType, 'ESTORNO'>;
+
+export const MOVEMENT_LABELS: Record<StockMovementType, string> = {
+  ENTRADA: 'Entrada',
+  SAIDA: 'Saída',
+  AJUSTE: 'Ajuste',
+  ESTORNO: 'Estorno de venda',
+};
+
+export interface StockMovement {
+  id: string;
+  product: { id: string; sku: string; name: string };
+  type: StockMovementType;
+  /** Com sinal: negativo é saída. */
+  quantity: number;
+  balanceAfter: number;
+  reason: string | null;
+  user: Ref;
+  createdAt: string;
+}
+
+export interface StockAlert {
+  id: string;
+  sku: string;
+  name: string;
+  category: Ref;
+  currentStock: number;
+  minStock: number;
+  /** minStock - currentStock */
+  shortage: number;
+}
+
 // Espelham as listas permitidas dos DTOs de listagem do back-end.
 export const PRODUCT_SORT_FIELDS = [
   'name',

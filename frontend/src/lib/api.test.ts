@@ -16,7 +16,8 @@ describe('cliente da API', () => {
     })();
     expect(session?.user.role).toBe('GERENTE');
     const res = await api<{ meta: { total: number } }>('/stock/alerts');
-    expect(res.meta.total).toBe(3);
+    // O mock calcula os alertas do catálogo de teste: 1 produto abaixo do mínimo.
+    expect(res.meta.total).toBe(1);
   });
 
   it('3 chamadas com token expirado: UMA renovação e as 3 são repetidas', async () => {
@@ -30,7 +31,7 @@ describe('cliente da API', () => {
     ]);
 
     expect(mockState.refreshCalls).toBe(1);
-    expect(results.map((r) => r.meta.total)).toEqual([3, 3, 3]);
+    expect(results.map((r) => r.meta.total)).toEqual([1, 1, 1]);
     expect(tokenStore.get()).toBe(mockState.validToken);
   });
 
