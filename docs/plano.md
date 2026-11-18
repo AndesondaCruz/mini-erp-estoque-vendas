@@ -426,3 +426,12 @@ Decisões da Fase 6 (18/11/2026):
 28. O valor do estoque conta todos os produtos com saldo, inclusive os desativados (a mercadoria continua na loja), e informa quantos estão desativados.
 29. O alerta de estoque mínimo usa a mesma regra do filtro `lowStock` de produtos (`current_stock <= min_stock`), só para produtos ativos, ordenado pela maior falta. Trade-off: um produto com mínimo 0 e saldo 0 aparece no alerta; definir mínimo maior que zero é a forma de dizer "quero ser avisado".
 30. Semana começa na segunda-feira (padrão ISO do `date_trunc` do Postgres).
+
+Decisões da Fase 7 (18/11/2026):
+
+31. Front-end em TypeScript 6, a mesma versão do back-end. O TypeScript 7 já existe, mas manter uma versão só no repositório é mais simples de manter e explicar.
+32. Access token só em memória. Ao abrir ou recarregar a página, o app chama `POST /auth/refresh`: a sessão volta pelo cookie `httpOnly`, sem token exposto ao JavaScript.
+33. Renovação "single-flight": várias chamadas com 401 ao mesmo tempo compartilham uma única renovação. Renovações paralelas com o mesmo cookie seriam tratadas pelo back-end como reuso de token.
+34. Em desenvolvimento, o Vite faz proxy de `/api` para a API, deixando front e API na mesma origem (o cookie `SameSite=Strict` funciona). Em produção, o mesmo papel é da Vercel (decisão 7).
+35. Acessibilidade verificada com `axe-core` direto (helper próprio), e não com o pacote `vitest-axe`, parado na versão 0.1.0. A regra de contraste fica desligada nos testes porque o jsdom não calcula cores.
+36. As seções do menu existem desde já, com rotas protegidas por papel e uma tela "em construção". As telas reais chegam nas Fases 8 e 9.

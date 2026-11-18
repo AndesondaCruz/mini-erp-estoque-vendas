@@ -422,3 +422,44 @@ O teste "venda às 23h30 em Fortaleza conta no dia local" foi rodado com `REPORT
 
 3. **O SQL desses relatórios é cru. Isso não abre brecha para injeção?**
    Não, porque nada é concatenado: o `$queryRaw` com template tagged transforma cada valor interpolado em parâmetro da consulta. Além disso, o `groupBy` é validado contra uma lista fixa (`day`, `week`, `month`) antes de chegar ao SQL, e as datas passam por validação de formato e de data real.
+
+## Fase 7: base do front-end
+
+### Conceitos usados
+
+- **Access token só em memória.** O token fica numa variável do módulo `lib/api.ts`, nunca no `localStorage`. Um script injetado (XSS) não encontra token guardado para roubar. O preço: recarregar a página apaga o token. A solução é a primeira chamada do app ser `POST /auth/refresh`: o cookie `httpOnly` (que o JavaScript não lê) devolve uma sessão nova.
+- **Renovação transparente com repetição.** O cliente HTTP, ao receber 401 numa rota que não é de autenticação, renova a sessão e repete a chamada uma vez. Se a renovação falha, avisa o `AuthProvider`, que encerra a sessão e o usuário volta ao login.
+- **Single-flight.** `refreshing ??= doRefresh().finally(() => { refreshing = null })`: a primeira chamada cria a promessa da renovação; as outras recebem a mesma promessa. Cinco chamadas com 401 ao mesmo tempo geram uma renovação só. Isso também cobre o `StrictMode` do React, que monta os efeitos duas vezes em desenvolvimento.
+- **Proxy do Vite.** O front chama `/api/...` na própria origem (`localhost:5173`) e o Vite repassa para `localhost:3000`. Para o navegador, o cookie de refresh é de primeira parte, então o `SameSite=Strict` não o bloqueia, e o `Path=/api/v1/auth` continua valendo.
+- **Guarda de rota por papel.** `<RequireAuth roles={[...]}>` redireciona para o login (guardando a página de origem em `location.state`) ou mostra a tela 403. É experiência do usuário; a proteção real é o `RolesGuard` da API. O menu vem da mesma lista (`NAV_ITEMS`), então menu e rotas não divergem.
+- **Formato de erro único.** `ApiError` lê `message`, `details` e `requestId` do filtro global do back-end. A tela mostra a mensagem e o código da requisição, que é o que o suporte procura no log.
+- **Testes com API simulada.** O MSW intercepta o `fetch` e responde como a API. O estado do mock imita o cookie de sessão. Requisição sem handler falha o teste (`onUnhandledFrame: 'error'`), então nenhum teste passa chamando uma rota que o mock não conhece.
+- **Acessibilidade.** Rótulos ligados aos campos, `aria-invalid` e `aria-describedby` nos erros, `role="alert"` nas mensagens da API, link "Pular para o conteúdo", foco visível e `<output>` (status) no carregamento. O `axe-core` roda nas telas de login, layout, 403 e 404, e o lint inclui as regras `jsx-a11y`.
+
+### Conferido nos dois sentidos
+
+- **Single-flight:** trocando a promessa compartilhada por uma renovação por chamada, o teste "3 chamadas com token expirado" falhou com `expected 3 to be 1`: três renovações, exatamente o cenário que o back-end trataria como reuso de token.
+- **Contra a API real:** com o banco, a API compilada e o `vite` rodando, o login pelo proxy gravou o cookie com `Path=/api/v1/auth`, o refresh pelo proxy com esse cookie devolveu um token novo, e a chamada autenticada respondeu 200 (401 sem token).
+
+### Decisões e alternativas descartadas
+
+| Decisão | Por quê | Alternativa descartada |
+|---|---|---|
+| Token em memória + refresh no carregamento | Nenhum token legível por JavaScript | `localStorage`: sobrevive ao recarregar, mas qualquer XSS lê |
+| Renovação single-flight | Respeita a detecção de reuso do back-end | Cada chamada renova sozinha: derruba a própria sessão |
+| Proxy do Vite em desenvolvimento | Mesma origem: cookie `Strict` funciona sem mudar a API | CORS com `SameSite=None`: enfraquece a proteção contra CSRF |
+| `axe-core` direto | Sem depender de pacote parado | `vitest-axe` 0.1.0 |
+| MSW nos testes | Testa o cliente HTTP de verdade (cabeçalhos, 401, repetição) | Mockar o módulo `api`: não testaria a renovação |
+| Menu e rotas da mesma lista | Um item novo aparece no menu e ganha a guarda juntos | Listas separadas: fácil esquecer uma |
+| TypeScript 6 no front | Mesma versão do back-end | TypeScript 7: duas versões no mesmo repositório |
+
+### Perguntas de entrevista
+
+1. **Onde você guarda o JWT no front-end, e por quê?**
+   O access token fica só em memória; o refresh token fica num cookie `httpOnly`, `SameSite=Strict`, que o JavaScript não consegue ler. Assim um XSS não tem token para roubar. Quando a página recarrega, o app chama o refresh e o cookie devolve uma sessão nova.
+
+2. **O token expirou e a tela dispara cinco requisições ao mesmo tempo. O que acontece?**
+   As cinco recebem 401. A primeira inicia a renovação e as outras quatro aguardam a mesma promessa. Com o token novo, as cinco são repetidas. Se cada uma renovasse sozinha, o back-end veria o mesmo refresh token usado várias vezes e trataria como roubo. Testei isso: sem o single-flight, aconteceram três renovações em vez de uma.
+
+3. **Se o menu já esconde "Usuários" do vendedor, por que o back-end ainda checa o papel?**
+   Porque o front roda no computador do usuário: qualquer um pode chamar a API direto, sem a tela. O menu e a guarda de rota são experiência; a segurança é o `RolesGuard` da API, que nega por padrão.
