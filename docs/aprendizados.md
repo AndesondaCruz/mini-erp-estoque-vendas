@@ -347,3 +347,39 @@ Também passam: 5 vendas simultâneas da última unidade (1 sucesso, 4 respostas
 
 3. **Por que o preço não vem do front, se o front já mostra o total?**
    Porque qualquer um pode chamar a API com `unitPrice: 0.01`. O servidor lê o preço do banco, no mesmo comando que baixa o estoque, e grava uma cópia no item da venda. O total mostrado no front é só informativo; o que vale é o calculado no servidor com `Decimal`.
+
+## Fase 5: cancelamento de venda
+
+### Conceitos usados
+
+- **Troca de status atômica e condicional.** `UPDATE sales SET status = 'CANCELADA', ... WHERE id = ... AND status = 'CONCLUIDA' RETURNING id`. É o mesmo padrão da baixa de estoque (`WHERE current_stock >= q`), aplicado ao status: a condição e a escrita são um comando só. Se afetou 0 linhas, o service descobre o motivo (404 se não existe, 409 se já foi cancelada).
+- **Estorno reaproveitando o `StockService`.** Cada item volta ao estoque por `StockService.increase(tx, 'ESTORNO', ...)`, dentro da transação do cancelamento, com o `saleId` e o motivo. Como o `increase` não exige produto ativo, o estoque volta mesmo que o produto tenha sido desativado depois da venda.
+- **Ordem de locks consistente.** O cancelamento trava a linha da venda e depois os produtos em ordem de `productId`, a mesma ordem da venda. Um cancelamento e uma venda nova dos mesmos produtos nunca formam ciclo.
+- **`@Roles` no método vence o da classe.** O `SalesController` libera os três papéis na classe; a rota de cancelamento declara `@Roles('ADMIN', 'GERENTE')` e sobrescreve. É a regra do `getAllAndOverride` do RolesGuard da Fase 1.
+- **Banco preparado antes.** Os campos de cancelamento e o CHECK "os três juntos, só em venda cancelada" foram criados na Fase 4. Esta fase não precisou de migration.
+
+### O estorno em dobro que a condição evita
+
+O teste dispara 5 cancelamentos simultâneos da mesma venda e espera `[200, 409, 409, 409, 409]`, com o estoque devolvido uma vez. Conferido nos dois sentidos: **sem** o `AND status = 'CONCLUIDA'`, o resultado foi `[200, 200, 200, 200, 200]`. Os 5 cancelamentos passaram, e o estoque teria voltado 5 vezes: mercadoria que não existe aparecendo no sistema. Com a condição, os 4 últimos esperam a linha da venda, reavaliam o `WHERE` com o status já `CANCELADA` e afetam 0 linhas.
+
+### Decisões e alternativas descartadas
+
+| Decisão | Por quê | Alternativa descartada |
+|---|---|---|
+| `UPDATE ... WHERE status = 'CONCLUIDA'` | Condição e escrita atômicas; sem lock explícito | Ler o status e depois atualizar: dois cancelamentos simultâneos leriam "CONCLUIDA" e estornariam em dobro |
+| VENDEDOR não cancela, nem as próprias vendas | Evita a fraude de vender, receber e cancelar | Deixar o vendedor cancelar as próprias: o caixa perderia o registro |
+| Estorno também para produto desativado | A mercadoria voltou fisicamente para a loja | Recusar o cancelamento: a venda ficaria sem como ser desfeita |
+| Cancelamento total, sem devolução parcial | Resolve o caso principal (venda registrada por engano) com uma regra simples | Devolução parcial: exige controlar, por item, quanto já voltou (fica para próximos passos) |
+| Sem prazo limite para cancelar | Fora do MVP, como previsto no plano | Limite por dia ou papel: fica para próximos passos |
+| Resposta 200 com a venda atualizada | O front mostra quem cancelou e quando sem outra requisição | 204 sem corpo |
+
+### Perguntas de entrevista
+
+1. **Dois gerentes cancelam a mesma venda ao mesmo tempo. O estoque volta duas vezes?**
+   Não. A troca de status é um `UPDATE` condicional (`WHERE status = 'CONCLUIDA'`). O Postgres serializa as duas atualizações na mesma linha; a segunda, ao conseguir a linha, vê o status já `CANCELADA`, afeta 0 linhas e a API responde 409 antes de estornar qualquer item. Testei removendo a condição: os 5 cancelamentos simultâneos passaram.
+
+2. **Por que o vendedor não pode cancelar a própria venda?**
+   Porque abriria uma fraude clássica: registrar a venda, receber em dinheiro e cancelar para apagar o registro do caixa. O cancelamento exige alguém de papel superior, com motivo obrigatório e auditoria.
+
+3. **O que acontece com o estoque se o produto foi desativado depois da venda?**
+   Volta mesmo assim. Desativar impede vender e dar saída, mas a mercadoria do cancelamento voltou fisicamente para a loja. O estorno usa o `increase` do `StockService`, que não exige produto ativo, e grava uma movimentação ESTORNO ligada à venda.

@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  HttpCode,
   HttpStatus,
   Ip,
   Param,
@@ -26,7 +27,12 @@ import type { AuthenticatedUser } from '../auth/authenticated-user.js';
 import { CurrentUser } from '../auth/decorators/current-user.decorator.js';
 import { Roles } from '../auth/decorators/roles.decorator.js';
 import type { Paginated } from '../common/pagination/pagination.js';
-import { CreateSaleDto, ListSalesQueryDto, SaleDto } from './dto/sale.dto.js';
+import {
+  CancelSaleDto,
+  CreateSaleDto,
+  ListSalesQueryDto,
+  SaleDto,
+} from './dto/sale.dto.js';
 import { IdempotencyKey } from './idempotency-key.decorator.js';
 import { SalesService } from './sales.service.js';
 
@@ -97,5 +103,25 @@ export class SalesController {
     @Param('id', ParseUUIDPipe) id: string,
   ): Promise<SaleDto> {
     return this.sales.findOne(actor, id);
+  }
+
+  @Post(':id/cancel')
+  @Roles('ADMIN', 'GERENTE')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({
+    summary: 'Cancela uma venda e estorna o estoque (ADMIN e GERENTE)',
+    description:
+      'O VENDEDOR não cancela vendas, nem as próprias: vender, receber e cancelar apagaria o registro do caixa.',
+  })
+  @ApiOkResponse({ type: SaleDto })
+  @ApiNotFoundResponse({ description: 'Venda não encontrada' })
+  @ApiConflictResponse({ description: 'Venda já cancelada' })
+  cancel(
+    @CurrentUser() actor: AuthenticatedUser,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: CancelSaleDto,
+    @Ip() ip: string,
+  ): Promise<SaleDto> {
+    return this.sales.cancel(actor, id, dto, ip);
   }
 }

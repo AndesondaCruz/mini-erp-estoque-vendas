@@ -1,4 +1,4 @@
-import { ConflictException } from '@nestjs/common';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import type { AuditService } from '../audit/audit.service.js';
 import type { AuthenticatedUser } from '../auth/authenticated-user.js';
 import { toDecimal } from '../common/money/money.js';
@@ -168,5 +168,83 @@ describe('SalesService.create', () => {
       });
       expect(result).toMatchObject({ created: false, sale: { id: 's1' } });
     });
+  });
+});
+
+describe('SalesService.cancel', () => {
+  const manager: AuthenticatedUser = { ...seller, id: 'g1', role: 'GERENTE' };
+
+  function setupCancel(updatedRows: { id: string }[]) {
+    const tx = {
+      $queryRaw: vi.fn().mockResolvedValue(updatedRows),
+      sale: {
+        count: vi.fn().mockResolvedValue(0),
+        findUniqueOrThrow: vi
+          .fn()
+          .mockResolvedValue(
+            makeSale({ status: 'CANCELADA', canceledAt: new Date() }),
+          ),
+      },
+      saleItem: {
+        findMany: vi.fn().mockResolvedValue([
+          { productId: 'p1', quantity: 2 },
+          { productId: 'p2', quantity: 1 },
+        ]),
+      },
+    };
+    const prisma = {
+      $transaction: vi.fn((fn: (t: typeof tx) => unknown) => fn(tx)),
+    };
+    const stock = { increase: vi.fn() };
+    const audit = { record: vi.fn() };
+    const service = new SalesService(
+      prisma as unknown as PrismaService,
+      stock as unknown as StockService,
+      audit as unknown as AuditService,
+    );
+    return { service, tx, stock, audit };
+  }
+
+  it('estorna cada item com ESTORNO, ligado à venda e com o motivo', async () => {
+    const { service, stock, audit } = setupCancel([{ id: 's1' }]);
+    await service.cancel(manager, 's1', { reason: 'Desistiu' });
+
+    expect(stock.increase).toHaveBeenCalledTimes(2);
+    expect(stock.increase.mock.calls[0].slice(1)).toEqual([
+      'ESTORNO',
+      {
+        productId: 'p1',
+        quantity: 2,
+        userId: 'g1',
+        reason: 'Desistiu',
+        saleId: 's1',
+      },
+    ]);
+    expect(audit.record.mock.calls[0][0].action).toBe('SALE_CANCELED');
+  });
+
+  it('busca os itens em ordem de productId (mesma ordem da venda)', async () => {
+    const { service, tx } = setupCancel([{ id: 's1' }]);
+    await service.cancel(manager, 's1', { reason: 'x' });
+    expect(tx.saleItem.findMany).toHaveBeenCalledWith({
+      where: { saleId: 's1' },
+      orderBy: { productId: 'asc' },
+    });
+  });
+
+  it('0 linhas e a venda existe: 409, sem estornar nada', async () => {
+    const { service, tx, stock } = setupCancel([]);
+    tx.sale.count.mockResolvedValue(1);
+    await expect(
+      service.cancel(manager, 's1', { reason: 'x' }),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(stock.increase).not.toHaveBeenCalled();
+  });
+
+  it('0 linhas e a venda não existe: 404', async () => {
+    const { service } = setupCancel([]);
+    await expect(
+      service.cancel(manager, 's1', { reason: 'x' }),
+    ).rejects.toBeInstanceOf(NotFoundException);
   });
 });

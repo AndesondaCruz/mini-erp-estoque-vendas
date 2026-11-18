@@ -15,7 +15,8 @@ export type AuditAction =
   | 'PRODUCT_REACTIVATED'
   | 'STOCK_MANUAL_EXIT'
   | 'STOCK_ADJUSTED'
-  | 'SALE_CREATED';
+  | 'SALE_CREATED'
+  | 'SALE_CANCELED';
 
 // Campos que podem aparecer em before/after, por entidade.
 // Lista de PERMITIDOS: um campo novo (como um hash) fica fora até alguém
@@ -23,7 +24,17 @@ export type AuditAction =
 export const AUDITABLE_FIELDS = {
   User: ['id', 'name', 'email', 'role', 'active'],
   Product: ['id', 'sku', 'name', 'costPrice', 'salePrice', 'active'],
-  Sale: ['id', 'number', 'sellerId', 'total', 'status', 'items'],
+  Sale: [
+    'id',
+    'number',
+    'sellerId',
+    'total',
+    'status',
+    'items',
+    'canceledAt',
+    'canceledById',
+    'cancelReason',
+  ],
   StockMovement: [
     'id',
     'productId',

@@ -17,6 +17,7 @@ import { Prisma } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { StockService } from '../stock/stock.service.js';
 import type {
+  CancelSaleDto,
   CreateSaleDto,
   ListSalesQueryDto,
   SaleDto,
@@ -171,6 +172,83 @@ export class SalesService {
       }
       throw error;
     }
+  }
+
+  /**
+   * Cancelamento total (risco 14 do plano), numa transação:
+   * 1) troca de status atômica e condicional: só cancela se ainda estiver
+   *    CONCLUIDA. Dois cancelamentos simultâneos disputam a linha da venda;
+   *    o segundo reavalia o WHERE com o status já CANCELADA e afeta 0 linhas.
+   *    Sem isso, o estoque seria estornado em dobro.
+   * 2) estorno de todos os itens, em ordem de productId (mesma ordem da
+   *    venda: sem ciclo de locks, sem deadlock). Vale para produto
+   *    desativado: a mercadoria voltou fisicamente para a loja.
+   * 3) auditoria.
+   */
+  async cancel(
+    actor: AuthenticatedUser,
+    id: string,
+    dto: CancelSaleDto,
+    ip?: string,
+  ): Promise<SaleDto> {
+    const sale = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.$queryRaw<{ id: string }[]>`
+        UPDATE sales
+        SET status = 'CANCELADA',
+            canceled_at = now(),
+            canceled_by_id = ${actor.id}::uuid,
+            cancel_reason = ${dto.reason}
+        WHERE id = ${id}::uuid AND status = 'CONCLUIDA'
+        RETURNING id`;
+
+      if (updated.length === 0) {
+        // 0 linhas: só descobrir o motivo para a mensagem.
+        const exists = await tx.sale.count({ where: { id } });
+        if (!exists) throw new NotFoundException('Venda não encontrada');
+        throw new ConflictException('Venda já cancelada');
+      }
+
+      const items = await tx.saleItem.findMany({
+        where: { saleId: id },
+        orderBy: { productId: 'asc' },
+      });
+      for (const item of items) {
+        await this.stock.increase(tx, 'ESTORNO', {
+          productId: item.productId,
+          quantity: item.quantity,
+          userId: actor.id,
+          reason: dto.reason,
+          saleId: id,
+        });
+      }
+
+      const canceled = await tx.sale.findUniqueOrThrow({
+        where: { id },
+        include: WITH_DETAILS,
+      });
+      await this.audit.record(
+        {
+          action: 'SALE_CANCELED',
+          userId: actor.id,
+          entity: 'Sale',
+          entityId: id,
+          before: { id, number: canceled.number, status: 'CONCLUIDA' },
+          after: {
+            id,
+            number: canceled.number,
+            status: canceled.status,
+            total: formatMoney(canceled.total),
+            canceledAt: canceled.canceledAt?.toISOString(),
+            canceledById: canceled.canceledById,
+            cancelReason: canceled.cancelReason,
+          },
+          ip,
+        },
+        tx,
+      );
+      return canceled;
+    });
+    return toSaleDto(sale, actor.role);
   }
 
   async list(

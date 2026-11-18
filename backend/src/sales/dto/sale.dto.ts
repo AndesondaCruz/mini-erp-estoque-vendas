@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   ArrayMinSize,
@@ -9,9 +9,12 @@ import {
   IsInt,
   IsISO8601,
   IsOptional,
+  IsString,
   IsUUID,
   Max,
+  MaxLength,
   Min,
+  MinLength,
   ValidateNested,
 } from 'class-validator';
 import { PaginationQueryDto } from '../../common/pagination/pagination.js';
@@ -49,6 +52,17 @@ export class CreateSaleDto {
   @ValidateNested({ each: true })
   @Type(() => SaleItemInputDto)
   items!: SaleItemInputDto[];
+}
+
+export class CancelSaleDto {
+  @ApiProperty({ example: 'Cliente desistiu da compra', maxLength: 255 })
+  @Transform(({ value }: { value: unknown }) =>
+    typeof value === 'string' ? value.trim() : value,
+  )
+  @IsString()
+  @MinLength(1, { message: 'o motivo do cancelamento é obrigatório' })
+  @MaxLength(255)
+  reason!: string;
 }
 
 export const SALE_SORT_FIELDS = ['createdAt', 'number', 'total'] as const;

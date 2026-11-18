@@ -104,6 +104,17 @@ Fase 4 (vendas) concluída:
 - Repetir a requisição com a mesma `Idempotency-Key` (duplo clique, retry de rede) devolve a venda já criada, sem baixar o estoque de novo
 - O VENDEDOR não vê o custo dos itens; cada venda vai para a auditoria
 
+Fase 5 (cancelamento de venda) concluída:
+
+| Rota | Quem acessa | Descrição |
+|---|---|---|
+| `POST /api/v1/sales/:id/cancel` | ADMIN, GERENTE | Cancela a venda com motivo obrigatório e devolve o estoque de todos os itens |
+
+- O VENDEDOR não cancela vendas, nem as próprias: vender, receber em dinheiro e cancelar apagaria o registro do caixa
+- Dois cancelamentos simultâneos da mesma venda: só um vence, e o estoque volta uma vez só (o outro recebe 409)
+- O estoque volta mesmo que o produto tenha sido desativado depois da venda
+- A venda cancelada continua no histórico, com quem cancelou, quando e por quê, e vai para a auditoria
+
 ## Stack
 
 - Back-end: NestJS 12, TypeScript 6, Prisma 7, PostgreSQL 16
