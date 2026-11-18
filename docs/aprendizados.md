@@ -463,3 +463,43 @@ O teste "venda às 23h30 em Fortaleza conta no dia local" foi rodado com `REPORT
 
 3. **Se o menu já esconde "Usuários" do vendedor, por que o back-end ainda checa o papel?**
    Porque o front roda no computador do usuário: qualquer um pode chamar a API direto, sem a tela. O menu e a guarda de rota são experiência; a segurança é o `RolesGuard` da API, que nega por padrão.
+
+## Fase 8a: telas de catálogo
+
+### Conceitos usados
+
+- **Estado da listagem na URL.** `useListParams` lê página, busca, ordenação e filtros de `useSearchParams`. O F5 e o botão voltar mantêm a lista, e o endereço de uma busca pode ser compartilhado. Como a URL pode ser editada à mão, tudo é validado ao ler: `?sort=senha` vira `name`, `?page=abc` vira 1. Mudar busca, filtro ou ordenação volta para a página 1, porque a página 5 de uma busca nova pode não existir.
+- **Chave da query = parâmetros da tela.** `queryKey: ['products', 'list', filtros]`: cada combinação de filtros tem seu cache. `keepPreviousData` mantém a página anterior na tela enquanto a próxima carrega, sem a tabela piscar. Depois de salvar, `invalidateQueries({ queryKey: ['products'] })` marca como velhas a lista e o detalhe de uma vez.
+- **Input diferente do output no formulário.** O schema zod recebe o que a pessoa digita ("5,50", "12") e entrega o que a API espera ("5.50", 12). Por isso o `useForm` tem dois tipos: `useForm<z.input<...>, unknown, z.output<...>>`. O mesmo vale para o fornecedor: campo vazio vira `null`, que no PATCH apaga o valor gravado.
+- **Dinheiro sem conta no front.** O valor vem como string ("5.50") e só vira `number` para o `Intl.NumberFormat` exibir. Nenhuma soma é feita no navegador, então o erro de ponto flutuante nunca chega à API.
+- **Papel na tela é UX.** O VENDEDOR não vê a coluna Custo nem os botões de cadastro, mas quem garante é o back-end: o `costPrice` nem vem na resposta, e as rotas de escrita respondem 403. O mock do MSW imita isso (a chave some para o VENDEDOR), então o teste confere a tela com a resposta real.
+- **Acessibilidade de tabela e formulário.** `aria-sort` no cabeçalho ordenado (o botão dentro do `th` recebe o foco), `<caption>` em cada tabela, `aria-label` nos botões de linha ("Editar Cerveja", não só "Editar"), `<output>` como região viva para "Produto desativado", `<search>` como landmark de busca e foco levado ao campo ao abrir o "Renomear". O status de estoque baixo é texto, não só cor.
+
+### Conferido nos dois sentidos
+
+- **Regra de papel:** mostrando a coluna Custo para todos (`canManage = true`), o teste "VENDEDOR: sem coluna de custo" falhou.
+- **URL editada à mão:** trocando a validação por `rawSort ?? defaultSort`, o teste "ordenação desconhecida volta ao padrão" falhou.
+- **Contra a API real:** pelo proxy do Vite, com o banco e a API compilada, as mesmas chamadas das telas responderam como esperado: listagens com `active`, `lowStock`, `categoryId` e ordenação (200), corpos dos formulários com `null` e preço em texto (201/200), SKU repetido (409), validação com `details` em lista (400), categoria em uso (409), desativar e reativar (204/200).
+
+### Decisões e alternativas descartadas
+
+| Decisão | Por quê | Alternativa descartada |
+|---|---|---|
+| Filtros na URL | Sobrevivem ao F5, ao voltar e podem ser compartilhados | `useState`: perde tudo ao navegar |
+| Formulário em rota própria | Sem trap de foco; link de edição compartilhável | Modal: mais código de acessibilidade |
+| Categoria editada na linha | Só tem nome e a API não tem `GET /categories/:id` | Criar o endpoint só para preencher um campo |
+| Busca no Enter | Uma requisição por busca, sem respostas fora de ordem | Busca a cada tecla com debounce |
+| Categorias e Fornecedores no menu | Permissões diferentes de Produtos | Abas dentro de Produtos |
+| `window.confirm` | Diálogo nativo, acessível e fácil de testar | Diálogo próprio com `aria-modal` e trap de foco |
+| Mock com regras do back-end | O teste de papel falha se a tela depender de um campo que a API não manda | Mock que devolve tudo para todos |
+
+### Perguntas de entrevista
+
+1. **Por que guardar filtros e paginação na URL?**
+   Porque a URL é o estado que o navegador já sabe guardar: F5, voltar e compartilhar um link funcionam sem código extra. O cuidado é tratar a URL como entrada do usuário: valido página e ordenação ao ler, e um valor inválido volta ao padrão em vez de virar erro.
+
+2. **O usuário digita "1.234,56" no preço. O que a API recebe, e por que não um number?**
+   Recebe a string "1234.56". O schema zod troca o separador e confere o formato igual ao do back-end. Não mando number porque o JSON passaria por ponto flutuante (0.1 + 0.2 não dá 0.3); a string vai direto para o `DECIMAL` do Postgres.
+
+3. **Se o VENDEDOR abrir o DevTools e mostrar a coluna de custo, ele vê o custo?**
+   Não. A coluna escondida é só experiência: o back-end nem manda o `costPrice` para o VENDEDOR. Nos testes, o mock da API também omite o campo para esse papel, e um teste falha se a coluna aparecer.

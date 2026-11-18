@@ -44,10 +44,30 @@ describe('rotas e guarda por papel', () => {
 
   it.each([
     ['VENDEDOR', ['Início', 'Produtos', 'Vendas']],
-    ['GERENTE', ['Início', 'Produtos', 'Vendas', 'Estoque', 'Relatórios']],
+    [
+      'GERENTE',
+      [
+        'Início',
+        'Produtos',
+        'Categorias',
+        'Fornecedores',
+        'Vendas',
+        'Estoque',
+        'Relatórios',
+      ],
+    ],
     [
       'ADMIN',
-      ['Início', 'Produtos', 'Vendas', 'Estoque', 'Relatórios', 'Usuários'],
+      [
+        'Início',
+        'Produtos',
+        'Categorias',
+        'Fornecedores',
+        'Vendas',
+        'Estoque',
+        'Relatórios',
+        'Usuários',
+      ],
     ],
   ] as const)('menu do %s mostra só o que ele acessa', async (role, items) => {
     signedInAs(role);

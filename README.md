@@ -135,7 +135,14 @@ Fase 7 (base do front-end) concluída:
 - Renovação automática do token quando ele expira: várias chamadas com 401 ao mesmo tempo disparam uma única renovação
 - Menu e rotas por papel (a tela de "sem permissão" é só experiência: quem protege os dados é a API)
 - Erros da API com a mensagem e o código da requisição, para o suporte
-- As telas de produtos, estoque, vendas, relatórios e usuários chegam nas Fases 8 e 9
+
+Fase 8, parte A (telas de catálogo) concluída:
+
+- Produtos, categorias e fornecedores: listagem com busca, filtros, ordenação e paginação, e formulários de criar e editar
+- Página, busca, filtros e ordenação ficam na URL: o F5 e o botão voltar mantêm a lista, e uma ordenação inválida digitada no endereço volta ao padrão
+- Por papel: o VENDEDOR vê produtos sem custo e sem botões de cadastro; só o ADMIN desativa e reativa produtos; categorias e fornecedores são de ADMIN e GERENTE
+- Preço digitado como "5,50" vai para a API como "5.50"; os erros de validação da API aparecem em lista, uma mensagem por campo
+- As telas de estoque, vendas, relatórios e usuários chegam nas próximas fases
 
 ## Stack
 
