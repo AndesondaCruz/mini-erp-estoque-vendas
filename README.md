@@ -115,6 +115,19 @@ Fase 5 (cancelamento de venda) concluída:
 - O estoque volta mesmo que o produto tenha sido desativado depois da venda
 - A venda cancelada continua no histórico, com quem cancelou, quando e por quê, e vai para a auditoria
 
+Fase 6 (alertas e relatórios) concluída. Com ela, o back-end do MVP está completo:
+
+| Rota | Quem acessa | Descrição |
+|---|---|---|
+| `GET /api/v1/stock/alerts` | todos | Produtos ativos com saldo menor ou igual ao mínimo, pela maior falta, sem custo |
+| `GET /api/v1/reports/sales?from=&to=&groupBy=day\|week\|month` | ADMIN, GERENTE | Vendas, faturamento e ticket médio por período; períodos sem venda aparecem zerados |
+| `GET /api/v1/reports/top-products?from=&to=&limit=` | ADMIN, GERENTE | Mais vendidos por quantidade, com faturamento |
+| `GET /api/v1/reports/stock-value` | ADMIN, GERENTE | Valor do estoque a custo e a preço de venda, por categoria |
+
+- `from` e `to` são datas do calendário (`2026-11-17`), inclusivas, interpretadas no fuso da loja (`REPORTS_TIMEZONE`, padrão `America/Fortaleza`): uma venda às 23h30 conta no dia certo, mesmo já sendo o dia seguinte em UTC
+- Os relatórios consideram só vendas concluídas: vender e cancelar não altera os números
+- Agregações feitas no SQL, com o fuso e o agrupamento passados como parâmetros da consulta
+
 ## Stack
 
 - Back-end: NestJS 12, TypeScript 6, Prisma 7, PostgreSQL 16

@@ -14,6 +14,7 @@ import { HealthModule } from './health/health.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
 import { SalesModule } from './sales/sales.module.js';
 import { ProductsModule } from './products/products.module.js';
+import { ReportsModule } from './reports/reports.module.js';
 import { StockModule } from './stock/stock.module.js';
 import { SuppliersModule } from './suppliers/suppliers.module.js';
 
@@ -98,6 +99,7 @@ const VALID_REQUEST_ID = /^[\w-]{1,64}$/;
     ProductsModule,
     StockModule,
     SalesModule,
+    ReportsModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
