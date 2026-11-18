@@ -55,7 +55,7 @@ describe('Produtos (e2e)', () => {
 
   beforeEach(async () => {
     await prisma.$executeRawUnsafe(
-      'TRUNCATE TABLE stock_movements, products, categories, suppliers, audit_logs',
+      'TRUNCATE TABLE sale_items, stock_movements, sales, products, categories, suppliers, audit_logs',
     );
     categoryId = (await prisma.category.create({ data: { name: 'Bebidas' } }))
       .id;

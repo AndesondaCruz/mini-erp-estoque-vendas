@@ -41,7 +41,7 @@ describe('Catálogo: categorias e fornecedores (e2e)', () => {
 
   beforeEach(async () => {
     await prisma.$executeRawUnsafe(
-      'TRUNCATE TABLE stock_movements, products, categories, suppliers',
+      'TRUNCATE TABLE sale_items, stock_movements, sales, products, categories, suppliers',
     );
   });
 

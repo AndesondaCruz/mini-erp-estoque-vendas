@@ -49,6 +49,15 @@ interface MovementInput {
   quantity: number;
   userId: string;
   reason?: string | null;
+  /** Venda que originou a saída (ou o estorno, na Fase 5). */
+  saleId?: string;
+}
+
+/** Resultado da baixa com os preços lidos no MESMO comando que baixou. */
+export interface DecreaseResult {
+  movement: MovementWithRefs;
+  salePrice: Prisma.Decimal;
+  costPrice: Prisma.Decimal;
 }
 
 /**
@@ -164,13 +173,32 @@ export class StockService {
    * saldo (já 0) e falha na condição. Nenhum lock explícito é necessário.
    */
   async decrease(tx: Tx, input: MovementInput): Promise<MovementWithRefs> {
-    const rows = await tx.$queryRaw<{ current_stock: number }[]>`
+    return (await this.decreaseReturningPrices(tx, input)).movement;
+  }
+
+  /**
+   * A mesma baixa, devolvendo também preço de venda e custo. A venda usa
+   * estes valores como snapshot (risco 6): como vêm do RETURNING do UPDATE
+   * que travou a linha, ninguém consegue mudar o preço entre a leitura e o
+   * fim da transação da venda.
+   */
+  async decreaseReturningPrices(
+    tx: Tx,
+    input: MovementInput,
+  ): Promise<DecreaseResult> {
+    const rows = await tx.$queryRaw<
+      {
+        current_stock: number;
+        sale_price: Prisma.Decimal;
+        cost_price: Prisma.Decimal;
+      }[]
+    >`
       UPDATE products
       SET current_stock = current_stock - ${input.quantity}, updated_at = now()
       WHERE id = ${input.productId}::uuid
         AND active
         AND current_stock >= ${input.quantity}
-      RETURNING current_stock`;
+      RETURNING current_stock, sale_price, cost_price`;
 
     if (rows.length === 0) {
       // 0 linhas: descobrir o motivo só para responder com a mensagem certa.
@@ -192,13 +220,18 @@ export class StockService {
         },
       });
     }
-    return this.insertMovement(
+    const movement = await this.insertMovement(
       tx,
       'SAIDA',
       -input.quantity,
       rows[0].current_stock,
       input,
     );
+    return {
+      movement,
+      salePrice: rows[0].sale_price,
+      costPrice: rows[0].cost_price,
+    };
   }
 
   /**
@@ -291,6 +324,7 @@ export class StockService {
         quantity,
         balanceAfter,
         reason: input.reason ?? null,
+        saleId: input.saleId ?? null,
         userId: input.userId,
       },
       include: WITH_REFS,

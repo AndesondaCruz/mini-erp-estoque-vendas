@@ -405,3 +405,11 @@ Decisões da Fase 3 (17/11/2026):
 16. `POST /stock/movements` recebe `quantity` para ENTRADA e SAIDA e `countedStock` para AJUSTE. O gerente informa o que contou, e o servidor calcula a diferença com a linha travada (risco 4). Mandar o campo do outro tipo responde 400.
 17. A coluna `saleId` de `StockMovement` entra na Fase 4, junto com a tabela de vendas, para já nascer com chave estrangeira.
 18. Exercícios do modo mentor ficam para o fim do projeto, numa rodada única (pedido do Andeson).
+
+Decisões da Fase 4 (18/11/2026):
+
+19. A venda é gravada antes das baixas de estoque. Duas requisições com a mesma `Idempotency-Key` disputam o índice único logo no início, e a segunda falha antes de travar qualquer produto.
+20. Preço e custo do item vêm do `RETURNING` do mesmo `UPDATE` que baixa o estoque (`StockService.decreaseReturningPrices`). A linha fica travada até o fim da transação, então o preço não muda entre a leitura e a gravação.
+21. `Idempotency-Key` é obrigatória. A mesma chave com itens diferentes ou de outro vendedor responde 409 (erro do cliente, não retry).
+22. VENDEDOR que pede a venda de outra pessoa recebe 404, e não 403, para não confirmar que o id existe.
+23. A saída gerada por venda dispensa motivo (o CHECK aceita `sale_id` no lugar do motivo); a saída manual continua exigindo. Só SAIDA e ESTORNO podem apontar para uma venda.

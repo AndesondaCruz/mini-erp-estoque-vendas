@@ -12,6 +12,7 @@ import { STRICT_THROTTLE_KEY } from './common/throttle/strict-throttle.decorator
 import { type Env, validateEnv } from './config/env.js';
 import { HealthModule } from './health/health.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
+import { SalesModule } from './sales/sales.module.js';
 import { ProductsModule } from './products/products.module.js';
 import { StockModule } from './stock/stock.module.js';
 import { SuppliersModule } from './suppliers/suppliers.module.js';
@@ -96,6 +97,7 @@ const VALID_REQUEST_ID = /^[\w-]{1,64}$/;
     SuppliersModule,
     ProductsModule,
     StockModule,
+    SalesModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
