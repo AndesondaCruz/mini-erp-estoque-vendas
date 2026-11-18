@@ -248,6 +248,20 @@ export function ProductsPage() {
                         >
                           Editar
                         </Link>
+                        <Link
+                          to={`/estoque?produto=${product.id}`}
+                          className={linkButton}
+                          aria-label={`Movimentações de ${product.name}`}
+                        >
+                          Movimentações
+                        </Link>
+                        <Link
+                          to={`/estoque/nova?produto=${product.id}`}
+                          className={linkButton}
+                          aria-label={`Lançar movimentação de ${product.name}`}
+                        >
+                          Lançar
+                        </Link>
                         {isAdmin && (
                           <button
                             type="button"

@@ -9,6 +9,8 @@ import { LoginPage } from './pages/LoginPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 import { ProductFormPage } from './pages/products/ProductFormPage';
 import { ProductsPage } from './pages/products/ProductsPage';
+import { MovementFormPage } from './pages/stock/MovementFormPage';
+import { StockPage } from './pages/stock/StockPage';
 import { SupplierFormPage } from './pages/suppliers/SupplierFormPage';
 import { SuppliersPage } from './pages/suppliers/SuppliersPage';
 
@@ -31,6 +33,11 @@ const SECTION_PAGES: Record<string, RouteObject[]> = {
   '/fornecedores': [
     { index: true, element: <SuppliersPage /> },
     formRoutes(<SupplierFormPage />),
+  ],
+  // A seção inteira já é só de ADMIN e GERENTE (NAV_ITEMS).
+  '/estoque': [
+    { index: true, element: <StockPage /> },
+    { path: 'nova', element: <MovementFormPage /> },
   ],
 };
 

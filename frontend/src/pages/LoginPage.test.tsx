@@ -36,7 +36,8 @@ describe('LoginPage', () => {
     expect(
       await screen.findByRole('heading', { name: 'Olá, Pessoa GERENTE' }),
     ).toBeVisible();
-    expect(await screen.findByTestId('alertas-total')).toHaveTextContent('3');
+    // 1 produto do catálogo de teste está abaixo do mínimo (ver api-mock).
+    expect(await screen.findByTestId('alertas-total')).toHaveTextContent('1');
   });
 
   it('não tem violações de acessibilidade', async () => {

@@ -446,3 +446,12 @@ Decisões da Fase 8a (18/11/2026):
 41. Selects de categoria e fornecedor carregam até 100 itens (o máximo da API). Basta para um comércio pequeno; com mais itens, o caminho é um campo com busca.
 42. Confirmação de desativar e excluir com `window.confirm`: acessível de graça (diálogo nativo) e simples de testar. Um diálogo próprio fica para quando houver necessidade visual.
 43. O bundle passou de 500 kB (507 kB, 147 kB com gzip). A divisão por rota com `React.lazy` fica para a Fase 10, com todas as telas prontas.
+
+Decisões da Fase 8b (18/11/2026):
+
+44. O formulário de movimentação valida com `z.discriminatedUnion('type', ...)`: um schema por tipo, espelho do `@ValidateIf` do DTO. Cada ramo descarta os campos dos outros, então um AJUSTE nunca leva `quantity` (a API responde 400 se levar).
+45. A tela guarda os campos de todos os tipos ao mesmo tempo: trocar de Entrada para Ajuste não apaga o que foi digitado. O preço disso é um cast no `zodResolver`, porque a entrada do formulário (`FormValues`) não é a entrada de nenhum ramo da união.
+46. A prévia do ajuste ("de 4 para 7") é calculada no navegador com o saldo buscado em `GET /products/:id`, e não com o da lista de busca. O valor gravado é sempre o do servidor, que recalcula a diferença sob lock.
+47. Um 409 de estoque insuficiente mostra o `details.available` e busca o saldo de novo: alguém vendeu enquanto a tela estava aberta.
+48. A busca de produto do formulário usa botões de rádio, e não um combobox ARIA próprio: o rádio já é navegável por setas e anunciado pelo leitor de tela. Ela não é um `<form>` (formulário dentro de formulário é HTML inválido), então o Enter é tratado à mão.
+49. O filtro "até" da tela é inclusivo, e o `to` da API é exclusivo: o front manda o início do dia seguinte, no fuso do navegador.
