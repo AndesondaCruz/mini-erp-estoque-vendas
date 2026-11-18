@@ -7,6 +7,7 @@ export interface NavItem {
 }
 
 const ALL: Role[] = ['ADMIN', 'GERENTE', 'VENDEDOR'];
+export const MANAGERS: Role[] = ['ADMIN', 'GERENTE'];
 
 /**
  * Menu e rotas por papel, conforme a matriz de permissões (seção 4 do plano).
@@ -15,6 +16,8 @@ const ALL: Role[] = ['ADMIN', 'GERENTE', 'VENDEDOR'];
 export const NAV_ITEMS: NavItem[] = [
   { to: '/', label: 'Início', roles: ALL },
   { to: '/produtos', label: 'Produtos', roles: ALL },
+  { to: '/categorias', label: 'Categorias', roles: MANAGERS },
+  { to: '/fornecedores', label: 'Fornecedores', roles: MANAGERS },
   { to: '/vendas', label: 'Vendas', roles: ALL },
   { to: '/estoque', label: 'Estoque', roles: ['ADMIN', 'GERENTE'] },
   { to: '/relatorios', label: 'Relatórios', roles: ['ADMIN', 'GERENTE'] },

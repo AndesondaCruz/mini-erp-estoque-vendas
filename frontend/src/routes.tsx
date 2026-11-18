@@ -1,18 +1,46 @@
 import type { RouteObject } from 'react-router';
 import { RequireAuth } from './auth/RequireAuth';
 import { Layout } from './components/Layout';
-import { NAV_ITEMS } from './lib/navigation';
+import { MANAGERS, NAV_ITEMS } from './lib/navigation';
+import { CategoriesPage } from './pages/categories/CategoriesPage';
 import { ComingSoonPage } from './pages/ComingSoonPage';
 import { HomePage } from './pages/HomePage';
 import { LoginPage } from './pages/LoginPage';
 import { NotFoundPage } from './pages/NotFoundPage';
+import { ProductFormPage } from './pages/products/ProductFormPage';
+import { ProductsPage } from './pages/products/ProductsPage';
+import { SupplierFormPage } from './pages/suppliers/SupplierFormPage';
+import { SuppliersPage } from './pages/suppliers/SuppliersPage';
+
+/** Rotas de criar/editar: só quem escreve no cadastro (ADMIN e GERENTE). */
+const formRoutes = (form: React.ReactElement): RouteObject => ({
+  element: <RequireAuth roles={MANAGERS} />,
+  children: [
+    { path: 'novo', element: form },
+    { path: ':id/editar', element: form },
+  ],
+});
+
+// Páginas de cada seção do menu. Seção sem entrada aqui mostra "Em breve".
+const SECTION_PAGES: Record<string, RouteObject[]> = {
+  '/produtos': [
+    { index: true, element: <ProductsPage /> },
+    formRoutes(<ProductFormPage />),
+  ],
+  '/categorias': [{ index: true, element: <CategoriesPage /> }],
+  '/fornecedores': [
+    { index: true, element: <SuppliersPage /> },
+    formRoutes(<SupplierFormPage />),
+  ],
+};
 
 // Cada seção do menu vira uma rota protegida pelos papéis da própria seção.
 const sections: RouteObject[] = NAV_ITEMS.filter((item) => item.to !== '/').map(
   (item) => ({
+    path: item.to,
     element: <RequireAuth roles={item.roles} />,
-    children: [
-      { path: item.to, element: <ComingSoonPage title={item.label} /> },
+    children: SECTION_PAGES[item.to] ?? [
+      { index: true, element: <ComingSoonPage title={item.label} /> },
     ],
   }),
 );

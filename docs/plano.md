@@ -360,8 +360,9 @@ Regra de trabalho: uma branch e um PR por feature, título em Conventional Commi
 **Fase 7: front-end base** (`feat/frontend-base`)
 - Vite + React + TS, Tailwind, TanStack Query, roteamento, tela de login, guarda de rotas por papel, refresh transparente do token, tratamento de erros da API.
 
-**Fase 8: front-end de catálogo e estoque** (`feat/frontend-catalog-stock`)
-- Telas de produtos, categorias, fornecedores, movimentações e alertas; testes com Testing Library e axe-core.
+**Fase 8: front-end de catálogo e estoque**, em dois PRs para a revisão ficar menor:
+- 8a (`feat/frontend-catalog`): telas de produtos, categorias e fornecedores; testes com Testing Library, MSW e axe-core.
+- 8b (`feat/frontend-stock`): extrato e lançamento de movimentações, histórico por produto, alertas na tela inicial.
 
 **Fase 9: front-end de vendas e relatórios** (`feat/frontend-sales-reports`)
 - Tela de venda (busca de produto, carrinho, `Idempotency-Key`, tratamento de 409), listagem de vendas, cancelamento com confirmação e motivo (ADMIN e GERENTE), relatórios com gráficos simples, tela de auditoria (ADMIN).
@@ -435,3 +436,13 @@ Decisões da Fase 7 (18/11/2026):
 34. Em desenvolvimento, o Vite faz proxy de `/api` para a API, deixando front e API na mesma origem (o cookie `SameSite=Strict` funciona). Em produção, o mesmo papel é da Vercel (decisão 7).
 35. Acessibilidade verificada com `axe-core` direto (helper próprio), e não com o pacote `vitest-axe`, parado na versão 0.1.0. A regra de contraste fica desligada nos testes porque o jsdom não calcula cores.
 36. As seções do menu existem desde já, com rotas protegidas por papel e uma tela "em construção". As telas reais chegam nas Fases 8 e 9.
+
+Decisões da Fase 8a (18/11/2026):
+
+37. Página, busca, filtros e ordenação da listagem ficam na URL (`useSearchParams`), não em estado local. Tudo é validado ao ler: página inválida vira 1 e ordenação fora da lista permitida vira o padrão.
+38. Criar e editar em rotas próprias (`/produtos/novo`, `/produtos/:id/editar`), não em modal: sem trap de foco, e o link de edição pode ser compartilhado. Exceção: categoria só tem nome e a API não tem `GET /categories/:id`, então criar e renomear acontecem na própria lista.
+39. Categorias e Fornecedores viram itens próprios do menu (ADMIN e GERENTE), e não abas dentro de Produtos: as permissões são diferentes e o `NAV_ITEMS` já resolve menu e rota por papel.
+40. Busca enviada no Enter ou no botão, não a cada tecla: sem debounce e sem respostas chegando fora de ordem.
+41. Selects de categoria e fornecedor carregam até 100 itens (o máximo da API). Basta para um comércio pequeno; com mais itens, o caminho é um campo com busca.
+42. Confirmação de desativar e excluir com `window.confirm`: acessível de graça (diálogo nativo) e simples de testar. Um diálogo próprio fica para quando houver necessidade visual.
+43. O bundle passou de 500 kB (507 kB, 147 kB com gzip). A divisão por rota com `React.lazy` fica para a Fase 10, com todas as telas prontas.
