@@ -106,6 +106,11 @@ export interface RequestOptions {
   body?: unknown;
   query?: Record<string, QueryValue>;
   headers?: Record<string, string>;
+  /**
+   * Cancela a requisição. O React Query passa um signal ao queryFn e aborta
+   * a busca quando a tela que esperava a resposta sai antes de ela chegar.
+   */
+  signal?: AbortSignal;
 }
 
 export async function api<T>(
@@ -123,6 +128,7 @@ export async function api<T>(
     headers,
     body: options.body === undefined ? undefined : JSON.stringify(options.body),
     credentials: 'same-origin',
+    signal: options.signal,
   });
 
   // 401 fora das rotas de autenticação: token expirado. Renova e repete 1 vez.

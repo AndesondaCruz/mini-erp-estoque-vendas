@@ -101,6 +101,7 @@ export const handlers = [
   ...catalogHandlers(),
   ...stockHandlers(),
   ...salesHandlers(),
+  ...reportsHandlers(),
 ];
 
 export const server = setupServer(...handlers);
@@ -135,6 +136,8 @@ export const catalog: {
    * é processado de verdade, mas a resposta não chega (TypeError no fetch).
    */
   dropNextSaleResponse: boolean;
+  /** Última query string de cada relatório, pelo caminho (/reports/sales). */
+  reportQueries: Record<string, URLSearchParams>;
   /** Última query string e último corpo recebidos, para os testes conferirem. */
   lastQuery: URLSearchParams | null;
   /** Último caminho de listagem chamado (ex.: /products/x/movements). */
@@ -148,6 +151,7 @@ export const catalog: {
   sales: [],
   saleKeys: [],
   dropNextSaleResponse: false,
+  reportQueries: {},
   lastPath: null,
   lastQuery: null,
   lastBody: null,
@@ -284,6 +288,7 @@ function resetCatalog(): void {
   ];
   catalog.saleKeys = [];
   catalog.dropNextSaleResponse = false;
+  catalog.reportQueries = {};
   catalog.lastQuery = null;
   catalog.lastPath = null;
   catalog.lastBody = null;
@@ -791,6 +796,180 @@ function salesHandlers() {
         cancelReason: reason,
       });
       return HttpResponse.json(toSale(sale));
+    }),
+  ];
+}
+
+// ---------------------------------------------------------------------------
+// Relatórios. Mesmas regras do ReportsService: só ADMIN e GERENTE, período em
+// datas inclusivas de no máximo 366 dias, só vendas concluídas, períodos sem
+// venda zerados, semana começando na segunda. O fuso aqui é o UTC da data de
+// createdAt (no back-end é o fuso da loja).
+
+const DAY = 24 * 60 * 60 * 1000;
+const utc = (date: string) => new Date(`${date}T00:00:00Z`);
+const dateOnly = (date: Date) => date.toISOString().slice(0, 10);
+
+/** Início do período que contém a data (o date_trunc do Postgres). */
+function bucketOf(date: string, groupBy: string): string {
+  if (groupBy === 'month') return `${date.slice(0, 8)}01`;
+  if (groupBy === 'week') {
+    const day = utc(date);
+    const sinceMonday = (day.getUTCDay() + 6) % 7;
+    return dateOnly(new Date(day.getTime() - sinceMonday * DAY));
+  }
+  return date;
+}
+
+function nextBucket(bucket: string, groupBy: string): string {
+  const date = utc(bucket);
+  if (groupBy === 'month') date.setUTCMonth(date.getUTCMonth() + 1);
+  else date.setUTCDate(date.getUTCDate() + (groupBy === 'week' ? 7 : 1));
+  return dateOnly(date);
+}
+
+function reportsHandlers() {
+  const guard = (request: Request) => {
+    if (!authorized(request)) return apiError(401, 'Token inválido');
+    if (!['ADMIN', 'GERENTE'].includes(mockState.session!.role)) {
+      return apiError(403, 'Seu perfil não tem permissão para esta ação');
+    }
+    return null;
+  };
+  /** Lê e confere o período, como o assertDateRange. */
+  const range = (request: Request) => {
+    const url = new URL(request.url);
+    const q = url.searchParams;
+    catalog.lastQuery = q;
+    catalog.reportQueries[url.pathname.replace('/api/v1', '')] = q;
+    const from = q.get('from') ?? '';
+    const to = q.get('to') ?? '';
+    const days = (utc(to).getTime() - utc(from).getTime()) / DAY + 1;
+    if (Number.isNaN(days)) {
+      return { error: apiError(400, 'from deve ser uma data válida') };
+    }
+    if (days < 1) {
+      return { error: apiError(400, 'from não pode ser depois de to') };
+    }
+    if (days > 366) {
+      return { error: apiError(400, 'o período pode ter no máximo 366 dias') };
+    }
+    const sales = catalog.sales.filter(
+      (s) =>
+        s.status === 'CONCLUIDA' &&
+        s.createdAt.slice(0, 10) >= from &&
+        s.createdAt.slice(0, 10) <= to,
+    );
+    return { q, from, to, sales };
+  };
+
+  return [
+    http.get('*/api/v1/reports/sales', ({ request }) => {
+      const denied = guard(request);
+      if (denied) return denied;
+      const r = range(request);
+      if ('error' in r) return r.error;
+      const groupBy = r.q.get('groupBy') ?? 'day';
+      const rows: { period: string; sales: number; revenue: string }[] = [];
+      const last = bucketOf(r.to, groupBy);
+      for (
+        let b = bucketOf(r.from, groupBy);
+        b <= last;
+        b = nextBucket(b, groupBy)
+      ) {
+        const inBucket = r.sales.filter(
+          (s) => bucketOf(s.createdAt.slice(0, 10), groupBy) === b,
+        );
+        rows.push({
+          period: b,
+          sales: inBucket.length,
+          revenue: money(inBucket.reduce((sum, s) => sum + cents(s.total), 0)),
+        });
+      }
+      const totalSales = r.sales.length;
+      const total = r.sales.reduce((sum, s) => sum + cents(s.total), 0);
+      return HttpResponse.json({
+        from: r.from,
+        to: r.to,
+        groupBy,
+        timezone: 'America/Fortaleza',
+        rows,
+        totalSales,
+        totalRevenue: money(total),
+        averageTicket: totalSales
+          ? money(Math.round(total / totalSales))
+          : null,
+      });
+    }),
+    http.get('*/api/v1/reports/top-products', ({ request }) => {
+      const denied = guard(request);
+      if (denied) return denied;
+      const r = range(request);
+      if ('error' in r) return r.error;
+      const byProduct = new Map<
+        string,
+        {
+          id: string;
+          sku: string;
+          name: string;
+          quantity: number;
+          cents: number;
+        }
+      >();
+      for (const item of r.sales.flatMap((s) => s.items)) {
+        const entry = byProduct.get(item.product.id) ?? {
+          ...item.product,
+          quantity: 0,
+          cents: 0,
+        };
+        entry.quantity += item.quantity;
+        entry.cents += cents(item.subtotal);
+        byProduct.set(item.product.id, entry);
+      }
+      const limit = Number(r.q.get('limit') ?? 10);
+      return HttpResponse.json(
+        [...byProduct.values()]
+          .sort((a, b) => b.quantity - a.quantity || b.cents - a.cents)
+          .slice(0, limit)
+          .map(({ cents: value, ...p }) => ({ ...p, revenue: money(value) })),
+      );
+    }),
+    http.get('*/api/v1/reports/stock-value', ({ request }) => {
+      const denied = guard(request);
+      if (denied) return denied;
+      // Produtos com saldo, inclusive desativados (a mercadoria está na loja).
+      const categories = catalog.categories
+        .map((category) => {
+          const items = catalog.products.filter(
+            (p) => p.categoryId === category.id && p.currentStock > 0,
+          );
+          return {
+            categoryId: category.id,
+            categoryName: category.name,
+            products: items.length,
+            inactiveProducts: items.filter((p) => !p.active).length,
+            units: items.reduce((sum, p) => sum + p.currentStock, 0),
+            cost: items.reduce(
+              (sum, p) => sum + cents(p.costPrice!) * p.currentStock,
+              0,
+            ),
+            sale: items.reduce(
+              (sum, p) => sum + cents(p.salePrice) * p.currentStock,
+              0,
+            ),
+          };
+        })
+        .filter((c) => c.products > 0);
+      return HttpResponse.json({
+        categories: categories.map(({ cost, sale, ...c }) => ({
+          ...c,
+          costValue: money(cost),
+          saleValue: money(sale),
+        })),
+        totalUnits: categories.reduce((sum, c) => sum + c.units, 0),
+        totalCostValue: money(categories.reduce((sum, c) => sum + c.cost, 0)),
+        totalSaleValue: money(categories.reduce((sum, c) => sum + c.sale, 0)),
+      });
     }),
   ];
 }
