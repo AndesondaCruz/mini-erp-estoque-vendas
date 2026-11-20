@@ -10,12 +10,21 @@ import { useAuth } from './auth-context';
  * dados de verdade é o RolesGuard do back-end.
  */
 export function RequireAuth({ roles }: { roles?: Role[] }) {
-  const { status, user } = useAuth();
+  const { status, user, notice } = useAuth();
   const location = useLocation();
 
   if (status === 'loading') return <Spinner label="Carregando sessão" />;
   if (!user) {
-    return <Navigate to="/login" replace state={{ from: location }} />;
+    // Sessão encerrada de propósito (há aviso, ex.: senha trocada): o novo
+    // login começa do início, e não volta para a página em que a pessoa
+    // estava (que seria a própria troca de senha).
+    return (
+      <Navigate
+        to="/login"
+        replace
+        state={notice ? undefined : { from: location }}
+      />
+    );
   }
   if (roles && !roles.includes(user.role)) return <ForbiddenPage />;
   return <Outlet />;

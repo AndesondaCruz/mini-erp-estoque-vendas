@@ -13,7 +13,8 @@ const schema = z.object({
 type LoginForm = z.infer<typeof schema>;
 
 export function LoginPage() {
-  const { status, login } = useAuth();
+  // notice: aviso de quem encerrou a sessão (ex.: "Senha alterada...").
+  const { status, login, notice } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [apiError, setApiError] = useState<unknown>(null);
@@ -46,6 +47,11 @@ export function LoginPage() {
         <p className="mb-6 text-sm text-slate-600">
           Estoque e vendas do seu comércio.
         </p>
+        {notice && (
+          <output className="mb-4 block rounded-md border border-green-200 bg-green-50 p-3 text-sm text-green-800">
+            {notice}
+          </output>
+        )}
         <form
           onSubmit={(e) => void onSubmit(e)}
           noValidate

@@ -176,6 +176,53 @@ export const PRODUCT_SORT_FIELDS = [
   'createdAt',
 ] as const;
 export const NAME_SORT_FIELDS = ['name', 'createdAt'] as const;
+export const USER_SORT_FIELDS = ['name', 'email', 'role'] as const;
+
+export const ROLES: Role[] = ['ADMIN', 'GERENTE', 'VENDEDOR'];
+
+// Auditoria. Espelha AUDIT_ACTIONS e AUDITABLE_FIELDS do back-end
+// (backend/src/audit/audit.types.ts).
+export const AUDIT_ACTION_LABELS = {
+  LOGIN_SUCCESS: 'Login',
+  LOGIN_FAILED: 'Login recusado',
+  LOGOUT: 'Saída',
+  REFRESH_TOKEN_REUSE: 'Reuso de sessão (sessões encerradas)',
+  PASSWORD_CHANGED: 'Senha trocada',
+  ACCESS_DENIED: 'Acesso negado',
+  USER_CREATED: 'Usuário criado',
+  USER_UPDATED: 'Usuário alterado',
+  PRODUCT_CREATED: 'Produto criado',
+  PRODUCT_PRICE_CHANGED: 'Preço alterado',
+  PRODUCT_DEACTIVATED: 'Produto desativado',
+  PRODUCT_REACTIVATED: 'Produto reativado',
+  STOCK_MANUAL_EXIT: 'Saída manual de estoque',
+  STOCK_ADJUSTED: 'Ajuste de estoque',
+  SALE_CREATED: 'Venda registrada',
+  SALE_CANCELED: 'Venda cancelada',
+} as const;
+export type AuditAction = keyof typeof AUDIT_ACTION_LABELS;
+
+export const AUDIT_ENTITY_LABELS = {
+  User: 'Usuário',
+  Product: 'Produto',
+  Sale: 'Venda',
+  StockMovement: 'Movimentação de estoque',
+} as const;
+export type AuditEntity = keyof typeof AUDIT_ENTITY_LABELS;
+
+export interface AuditLog {
+  id: string;
+  action: AuditAction;
+  /** null em login com e-mail inexistente. */
+  user: { id: string; name: string; email: string } | null;
+  entity: AuditEntity | null;
+  entityId: string | null;
+  before: Record<string, unknown> | null;
+  after: Record<string, unknown> | null;
+  metadata: Record<string, unknown> | null;
+  ip: string | null;
+  createdAt: string;
+}
 
 export const ROLE_LABELS: Record<Role, string> = {
   ADMIN: 'Administrador',

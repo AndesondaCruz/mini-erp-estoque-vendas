@@ -657,3 +657,42 @@ O teste "venda às 23h30 em Fortaleza conta no dia local" foi rodado com `REPORT
 
 3. **Como você evita que a mesma linha apareça em duas páginas da listagem?**
    Com uma ordenação determinística: `createdAt` e depois `id`. Só com a data, registros do mesmo milissegundo podem vir em ordem diferente a cada consulta, e o `OFFSET` da página seguinte pode repetir ou pular algum. O teste e2e percorre todas as páginas com `pageSize=2` e confere que cada id aparece uma vez só.
+
+## Fase 9c-2: telas de usuários, auditoria e troca de senha
+
+### Conceitos usados
+
+- **Estado que sobrevive a um redirecionamento.** Depois de trocar a senha, duas coisas querem levar a pessoa ao login: a própria tela e o `RequireAuth`, que percebe a sessão encerrada. Quem renderiza primeiro vence, e isso não é garantido. A solução foi tirar a disputa: só o `RequireAuth` redireciona, e o aviso fica num lugar que os dois enxergam (o contexto de auth), em vez de viajar no `state` da navegação.
+- **Encerrar a sessão sem falar com o servidor.** O `endSession` limpa o token em memória e o cache do React Query. O `logout` faz isso e também avisa a API. Depois de trocar a senha, a API já encerrou tudo, então avisar de novo só geraria um 401.
+- **Schema que muda com o modo do formulário.** `schemaFor(creating)` devolve um schema só, com `superRefine` (a senha é obrigatória só na criação) e `transform` (a senha nem sai na edição). O `useForm<Input, unknown, Output>` separa o que o formulário guarda do que vai para a API.
+- **Campo desabilitado não é enviado.** No react-hook-form, `register('role', { disabled: true })` tira o campo do resultado. Isso evita mandar o próprio papel, mesmo sem mudança.
+- **Diferença entre dois objetos.** `diffRows` junta as chaves de `before` e `after` e compara cada valor com `JSON.stringify`, que serve para valores de JSON. Quando só existe um dos lados (criação), nada é marcado como alterado: não há com o que comparar.
+- **Acessibilidade de listas repetidas.** Vários "Ver detalhes" iguais não dizem nada a quem usa leitor de tela. Um trecho `sr-only` dentro do `summary` acrescenta "de Preço alterado em 19/11/2026, 12:00".
+
+### Conferido nos dois sentidos
+
+- **Mutation checks** (12), cada um conferido como aplicado e derrubando pelo menos um teste: troca de senha sem aviso, `from` gravado mesmo com aviso, botão de desativar na própria linha, papel habilitado na própria conta, diferença nunca marcada, ação da URL sem validação, senha enviada na edição, papel traduzido em qualquer campo, fim do período sem incluir o último dia, confirmação de senha ignorada, senha inicial curta aceita e filtro de papel não enviado.
+- **Um bug achado pelo teste:** a primeira versão da troca de senha navegava para o login com o aviso no `state`. O teste falhou; um `console.log` do `state` mostrou `{ from: "/minha-senha" }` em vez do aviso. Era o `RequireAuth` vencendo a corrida.
+- **Contra a API real:** a lista com os parâmetros que a tela envia, `GET /users/:id` para o chip, a auditoria com os instantes gerados pelo navegador, o 403 de desativar a si mesmo, a edição sem senha, a senha atual errada (400, e não 401) e a troca certa (204, com o token antigo passando a dar 401).
+
+### Decisões e alternativas descartadas
+
+| Decisão | Por quê | Alternativa descartada |
+|---|---|---|
+| Aviso no contexto de auth | Um único redirecionamento, sem corrida | `navigate` com o aviso no `state` |
+| `endSession` em vez de `logout` | A sessão já acabou no servidor | `logout`, que daria 401 e refresh |
+| Filtro de usuário pela URL e chip | Não carrega a lista toda; o link da tela de usuários sai de graça | `<select>` com todos os usuários |
+| `<details>` nativo | Teclado e leitor de tela prontos | Modal próprio |
+| Sem botão de desativar na própria linha | Evita um erro previsível | Botão desabilitado (some do foco sem explicação) |
+| Um schema zod com `superRefine` | Tipagem única no `useForm` | Dois schemas, um por modo |
+
+### Perguntas de entrevista
+
+1. **Depois de trocar a senha, por que o front não chama o logout?**
+   Porque a API já encerrou todas as sessões, inclusive a atual. Chamar o logout com um token revogado daria 401, o cliente tentaria renovar a sessão e falharia. A tela só limpa o lado do navegador (token em memória e cache), e o guarda de rota leva ao login com o aviso.
+
+2. **Você esconde o botão de desativar a própria conta. Isso é segurança?**
+   Não. É experiência de uso. A regra está no service do back-end, que responde 403 a qualquer cliente que tente. A tela só evita que a pessoa clique em algo que vai falhar.
+
+3. **Como você achou o bug do aviso que sumia?**
+   O teste esperava o aviso na tela de login e não encontrou. Imprimi o `state` da navegação e ele tinha `from: "/minha-senha"`: quem tinha levado ao login era o `RequireAuth`, não a tela. Eram dois redirecionamentos disputando. Em vez de mexer na ordem das chamadas, deixei um só responsável e coloquei o aviso num estado compartilhado.
