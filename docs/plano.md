@@ -473,3 +473,15 @@ Decisões da Fase 9a (19/11/2026):
 57. Cancelar abre um formulário com motivo obrigatório na própria página. Não usa `window.confirm` (decisão 42), porque o confirm não tem campo de texto. O foco vai para o motivo ao abrir e volta para o botão ao desistir.
 58. A lista de vendas não tem filtro por vendedor: montar esse filtro exige `GET /users`, que é só do ADMIN, e o GERENTE ficaria com um campo vazio. Fica para quando existir uma rota de vendedores para o GERENTE.
 59. `useListParams` ganhou o parâmetro `defaultOrder`: vendas abrem da mais recente (`desc`), cadastros continuam em ordem alfabética (`asc`).
+
+Decisões da Fase 9b (19/11/2026):
+
+60. Relatórios numa página só (`/relatorios`), com o período no topo valendo para as vendas e para os mais vendidos. O valor do estoque é a posição atual e não usa o período, e a tela diz isso. Descartadas: uma rota por relatório (mais cliques e o período não seria compartilhado) e abas (escondem o valor do estoque).
+61. Período padrão: do dia 1º do mês até hoje, com atalhos (este mês, últimos 7, 30 e 90 dias) antes do intervalo personalizado. O padrão não é escrito na URL: um favorito de `/relatorios` continua significando "este mês" no mês seguinte.
+62. As datas vão para a API como datas de calendário (`AAAA-MM-DD`), sem conversão: o fuso da loja é aplicado no servidor. Só o "hoje" padrão é calculado no fuso do navegador; perto da meia-noite, fora de Fortaleza, pode diferir em um dia, e a pessoa pode trocar a data.
+63. O período é validado no navegador com as regras do `assertDateRange` (início depois do fim, mais de 366 dias). Período inválido mostra a mensagem e nem chama a API.
+64. Gráficos sem biblioteca: colunas em SVG (`ColumnChart`) para a série no tempo, e barras dentro das células da tabela para o ranking. Segue a skill de visualização: barras de até 24px com a ponta arredondada, grade fina e contínua, texto fora da cor da série (indigo-700, validado contra o fundo branco), rótulo só no maior valor, nada de gráfico de uma coluna só e o gráfico anterior esmaecido enquanto os dados novos chegam.
+65. No teclado, o gráfico é um `<input type="range">` oculto: uma parada de Tab, setas para percorrer os períodos e o `aria-valuetext` lido pelo leitor de tela. O lint recusou `role="group"` com `tabIndex` e depois sugeriu o elemento nativo no lugar de `role="slider"`. A tabela com todos os números continua logo abaixo.
+66. Na semana e no mês, o primeiro e o último período podem estar incompletos (o período começa na segunda ou no dia 1º, mas só conta os dias do filtro, como no back-end). A tela avisa.
+67. `api()` aceita o `AbortSignal` do React Query, e os relatórios o repassam: sair da tela antes da resposta cancela a requisição. Isso também corrigiu um vazamento entre testes (um 401 tardio de uma tela já desmontada disparava refresh no teste seguinte). Repassar o `signal` nas listas antigas fica para um PR próprio.
+68. O bundle foi a 560 kB (167 kB com gzip). Continua a decisão 43: divisão por rota na Fase 10.

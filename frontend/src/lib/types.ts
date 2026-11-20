@@ -120,6 +120,52 @@ export interface Sale {
 export const MAX_SALE_ITEMS = 50;
 export const MAX_QUANTITY = 1_000_000;
 
+// Relatórios. Datas de calendário (AAAA-MM-DD) no fuso da loja.
+export type GroupBy = 'day' | 'week' | 'month';
+
+export interface SalesReport {
+  from: string;
+  to: string;
+  groupBy: GroupBy;
+  timezone: string;
+  /** Um por período, inclusive os sem venda (zerados). period = início. */
+  rows: { period: string; sales: number; revenue: string }[];
+  totalSales: number;
+  totalRevenue: string;
+  /** null quando não há vendas. */
+  averageTicket: string | null;
+}
+
+export interface TopProduct {
+  id: string;
+  sku: string;
+  name: string;
+  quantity: number;
+  revenue: string;
+}
+
+export interface StockValueCategory {
+  categoryId: string;
+  categoryName: string;
+  /** Produtos com saldo. */
+  products: number;
+  /** Dos quais desativados. */
+  inactiveProducts: number;
+  units: number;
+  costValue: string;
+  saleValue: string;
+}
+
+export interface StockValue {
+  categories: StockValueCategory[];
+  totalUnits: number;
+  totalCostValue: string;
+  totalSaleValue: string;
+}
+
+/** Limite de período da API (MAX_RANGE_DAYS). */
+export const MAX_REPORT_DAYS = 366;
+
 // Espelham as listas permitidas dos DTOs de listagem do back-end.
 export const SALE_SORT_FIELDS = ['createdAt', 'number', 'total'] as const;
 export const PRODUCT_SORT_FIELDS = [

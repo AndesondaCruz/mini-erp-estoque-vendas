@@ -581,3 +581,42 @@ O teste "venda às 23h30 em Fortaleza conta no dia local" foi rodado com `REPORT
 
 3. **Por que o VENDEDOR recebe 404, e não 403, ao abrir a venda de outra pessoa?**
    Um 403 confirmaria que aquele id existe, o que é um vazamento de informação (IDOR). Com 404, "não existe" e "não é sua" ficam iguais para quem está de fora. A lista também filtra pelo id que vem do token, nunca por um parâmetro que o cliente possa trocar.
+
+## Fase 9b: relatórios
+
+### Conceitos usados
+
+- **Duas convenções de data na mesma API.** A lista de vendas filtra **instantes** (ISO, com o fim exclusivo), e o front converte usando o fuso do navegador. Os relatórios agrupam por **dia do calendário da loja** (`AAAA-MM-DD`, inclusivo), e o fuso é aplicado no servidor. Se o relatório usasse o fuso de quem olha, um gerente viajando veria a venda das 21h45 de Fortaleza no dia seguinte. Conferido contra a API real: uma venda gravada às 00:4x UTC do dia 20 aparece no dia 19.
+- **Data de calendário sem UTC.** `new Date("2026-11-20")` é meia-noite **UTC**, que no Brasil ainda é dia 19. As funções de `dates.ts` montam a data com ano, mês e dia locais e usam o meio-dia, longe da virada do dia.
+- **Gráfico desenhado à mão.** Escala linear (`y = base - valor / topo * altura`), passos "redondos" no eixo (1, 2 ou 5 x 10^n, em `niceTicks`) e largura medida com `ResizeObserver` para desenhar em pixels, porque com um `viewBox` fixo o texto encolheria no celular.
+- **Acessibilidade de gráfico.** O SVG é decorativo (`aria-hidden`). Os números completos estão na tabela. O teclado usa um `<input type="range">` com `aria-valuetext`: o leitor de tela lê "17/11/2026, 2 vendas: R$ 46,30" sem região viva. O lint conduziu essa escolha, primeiro recusando um `div` focável e depois preferindo o elemento nativo ao `role="slider"`.
+- **Cancelamento de requisição.** O React Query entrega um `AbortSignal` ao `queryFn`. Se o `signal` é repassado ao `fetch`, sair da tela cancela a requisição de verdade. Sem isso, a requisição continua e a resposta é descartada.
+- **Vazamento entre testes.** Um teste falhou sem ter nada de errado: o teste anterior terminava com requisições pendentes, que voltavam com 401 depois de o `afterEach` limpar o token e disparavam um refresh contado no teste seguinte. Rodar o teste isolado (`-t`) separou "teste errado" de "teste contaminado".
+
+### Conferido nos dois sentidos
+
+- **Mutation checks** (12), cada um derrubando pelo menos um teste: sem limite de 366 dias, início depois do fim aceito, API chamada com período inválido, "Este mês" errado, gráfico de uma coluna, ticket `null` virando R$ 0, seta para a esquerda quebrada, teclado sem o `onKeyDown`, coluna de valor zero desenhada, "hoje" em UTC, barra não relativa ao maior e `signal` não repassado ao `fetch`.
+- **Uma mutação que não foi aplicada:** o texto procurado não bateu com o arquivo, e o "30 passed" não provava nada. Refeita com o texto exato, ela derrubou o teste. Lição: confirmar que o mutante existe antes de ler o resultado.
+- **Contra a API real:** períodos zerados, semana começando em 26/10, mês único, ticket `null`, início depois do fim (400), 367 dias (400) e 366 (ok), mais vendidos, valor do estoque com desativados e VENDEDOR (403).
+
+### Decisões e alternativas descartadas
+
+| Decisão | Por quê | Alternativa descartada |
+|---|---|---|
+| Uma página, período compartilhado | Menos cliques, números que concordam entre si | Uma rota por relatório; abas |
+| SVG próprio | Zero kB a mais, controle total da acessibilidade | Recharts (~100 kB) |
+| Barras dentro da tabela no ranking | Cada valor já escrito, sem hover | Outro gráfico em SVG |
+| `<input type="range">` no teclado | Papel, foco e anúncio nativos | `div` focável com `role` |
+| Período padrão fora da URL | Favorito continua sendo "este mês" | Gravar as datas na URL ao abrir |
+| `AbortSignal` repassado | Cancela de verdade e isola os testes | Fazer o teste esperar a página carregar |
+
+### Perguntas de entrevista
+
+1. **Por que o relatório recebe "2026-11-20" e a lista de vendas recebe um instante ISO?**
+   Porque perguntam coisas diferentes. A lista pergunta "o que aconteceu entre estes dois momentos", e o momento depende do fuso de quem filtra. O relatório pergunta "quanto a loja vendeu no dia 20", e o dia é o do calendário da loja, igual para qualquer pessoa. Por isso o fuso do relatório fica no servidor, numa variável de ambiente.
+
+2. **Como um gráfico em SVG fica acessível?**
+   O desenho fica escondido do leitor de tela, e a mesma informação aparece de outro jeito: uma tabela com todos os números, um rótulo no maior valor e, no teclado, um controle de faixa nativo que anuncia o período e o valor a cada seta. A cor da série foi validada para contraste, e nenhum dado depende só da cor.
+
+3. **Um teste começou a falhar sem você ter mexido nele. Como você investigou?**
+   Rodei o teste sozinho e ele passou, então o problema vinha de outro teste. O anterior fazia login e caía na página de relatórios, que agora faz requisições. Ele terminava antes das respostas, o `afterEach` limpava o token, as respostas voltavam com 401 e disparavam um refresh contado no teste seguinte. A correção foi cancelar as requisições quando a tela desmonta, repassando o `AbortSignal` do React Query ao `fetch`. Isso também melhora o app real.

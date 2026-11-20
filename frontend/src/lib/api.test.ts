@@ -1,4 +1,4 @@
-import { http, HttpResponse } from 'msw';
+import { delay, http, HttpResponse } from 'msw';
 import { makeUser, mockState, server } from '../test/api-mock';
 import {
   api,
@@ -18,6 +18,23 @@ describe('cliente da API', () => {
     const res = await api<{ meta: { total: number } }>('/stock/alerts');
     // O mock calcula os alertas do catálogo de teste: 1 produto abaixo do mínimo.
     expect(res.meta.total).toBe(1);
+  });
+
+  it('signal abortado: a requisição é cancelada e não dispara renovação', async () => {
+    // Resposta lenta e com 401: sem o cancelamento, o 401 chegaria depois e
+    // dispararia um refresh que ninguém pediu (a tela já tinha saído).
+    server.use(
+      http.get('*/api/v1/lenta', async () => {
+        await delay(50);
+        return HttpResponse.json({ message: 'expirado' }, { status: 401 });
+      }),
+    );
+    const controller = new AbortController();
+    const request = api('/lenta', { signal: controller.signal });
+    controller.abort();
+
+    await expect(request).rejects.toMatchObject({ name: 'AbortError' });
+    expect(mockState.refreshCalls).toBe(0);
   });
 
   it('3 chamadas com token expirado: UMA renovação e as 3 são repetidas', async () => {

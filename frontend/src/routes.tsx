@@ -9,6 +9,7 @@ import { LoginPage } from './pages/LoginPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 import { ProductFormPage } from './pages/products/ProductFormPage';
 import { ProductsPage } from './pages/products/ProductsPage';
+import { ReportsPage } from './pages/reports/ReportsPage';
 import { NewSalePage } from './pages/sales/NewSalePage';
 import { SaleDetailPage } from './pages/sales/SaleDetailPage';
 import { SalesPage } from './pages/sales/SalesPage';
@@ -44,6 +45,8 @@ const SECTION_PAGES: Record<string, RouteObject[]> = {
     { path: 'nova', element: <NewSalePage /> },
     { path: ':id', element: <SaleDetailPage /> },
   ],
+  // Só ADMIN e GERENTE (NAV_ITEMS), como na API.
+  '/relatorios': [{ index: true, element: <ReportsPage /> }],
   // A seção inteira já é só de ADMIN e GERENTE (NAV_ITEMS).
   '/estoque': [
     { index: true, element: <StockPage /> },
