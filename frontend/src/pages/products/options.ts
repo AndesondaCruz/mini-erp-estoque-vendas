@@ -10,8 +10,9 @@ import type { Category, Paginated, Supplier } from '../../lib/types';
 export function useCategoryOptions() {
   return useQuery({
     queryKey: ['categories', 'options'],
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       api<Paginated<Category>>('/categories', {
+        signal,
         query: { pageSize: 100, sort: 'name' },
       }),
     select: (page) => page.data,
@@ -21,8 +22,9 @@ export function useCategoryOptions() {
 export function useSupplierOptions(enabled = true) {
   return useQuery({
     queryKey: ['suppliers', 'options'],
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       api<Paginated<Supplier>>('/suppliers', {
+        signal,
         query: { pageSize: 100, sort: 'name', active: true },
       }),
     select: (page) => page.data,

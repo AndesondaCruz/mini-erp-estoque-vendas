@@ -63,7 +63,7 @@ export function UserFormPage() {
   const { id } = useParams();
   const user = useQuery({
     queryKey: ['users', 'detail', id],
-    queryFn: () => api<User>(`/users/${id}`),
+    queryFn: ({ signal }) => api<User>(`/users/${id}`, { signal }),
     enabled: id !== undefined,
   });
 

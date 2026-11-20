@@ -43,7 +43,8 @@ export function SalesPage() {
   };
   const query = useQuery({
     queryKey: ['sales', 'list', params],
-    queryFn: () => api<Paginated<Sale>>('/sales', { query: params }),
+    queryFn: ({ signal }) =>
+      api<Paginated<Sale>>('/sales', { query: params, signal }),
     placeholderData: keepPreviousData,
   });
 

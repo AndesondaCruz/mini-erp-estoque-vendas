@@ -1,7 +1,8 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { startOfDayIso, endOfDayExclusiveIso } from '../../lib/dates';
-import { catalog } from '../../test/api-mock';
+import { http, HttpResponse } from 'msw';
+import { catalog, server } from '../../test/api-mock';
 import { expectNoA11yViolations } from '../../test/axe';
 import { renderAs } from '../../test/render';
 
@@ -247,6 +248,41 @@ describe('MovementFormPage (lançamento)', () => {
     expect(await selected('Sabão em pó 1 kg, saldo atual 20')).toBeVisible();
     expect(catalog.lastBody).toBeNull();
     expect(screen.queryByText('Escolha o produto')).toBeNull();
+  });
+
+  it('nova busca antes da resposta da anterior: a anterior é abortada', async () => {
+    // A primeira busca ("cer") fica presa no servidor até ser abortada (ou
+    // até 1 s, para o teste falhar em vez de travar). As outras seguem para
+    // o handler normal do mock.
+    const signals: Record<string, AbortSignal> = {};
+    server.use(
+      http.get('*/api/v1/products', async ({ request }) => {
+        const search = new URL(request.url).searchParams.get('search') ?? '';
+        signals[search] = request.signal;
+        if (search !== 'cer') return undefined;
+        await Promise.race([
+          new Promise((resolve) =>
+            request.signal.addEventListener('abort', resolve),
+          ),
+          new Promise((resolve) => setTimeout(resolve, 1000)),
+        ]);
+        return HttpResponse.error();
+      }),
+    );
+    renderAs('GERENTE', '/estoque/nova');
+    const user = userEvent.setup();
+    const input = await screen.findByLabelText('Buscar por nome ou SKU');
+
+    await user.type(input, 'cer{Enter}');
+    await waitFor(() => expect(signals.cer).toBeDefined());
+    await user.clear(input);
+    await user.type(input, 'sab{Enter}');
+
+    expect(
+      await screen.findByRole('radio', { name: /Sabão em pó/ }),
+    ).toBeVisible();
+    expect(signals.cer.aborted).toBe(true);
+    expect(signals.sab.aborted).toBe(false);
   });
 
   it('o formulário com erros não tem violações de acessibilidade', async () => {

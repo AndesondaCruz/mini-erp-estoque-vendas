@@ -31,7 +31,7 @@ export function SaleDetailPage() {
 
   const query = useQuery({
     queryKey: ['sales', 'detail', id],
-    queryFn: () => api<Sale>(`/sales/${id}`),
+    queryFn: ({ signal }) => api<Sale>(`/sales/${id}`, { signal }),
   });
 
   const canCancel =

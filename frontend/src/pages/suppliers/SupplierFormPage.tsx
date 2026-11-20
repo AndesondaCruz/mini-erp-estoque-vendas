@@ -51,7 +51,7 @@ export function SupplierFormPage() {
   const { id } = useParams();
   const supplier = useQuery({
     queryKey: ['suppliers', 'detail', id],
-    queryFn: () => api<Supplier>(`/suppliers/${id}`),
+    queryFn: ({ signal }) => api<Supplier>(`/suppliers/${id}`, { signal }),
     enabled: id !== undefined,
   });
 

@@ -53,7 +53,8 @@ export function ProductsPage() {
   };
   const query = useQuery({
     queryKey: ['products', 'list', filters],
-    queryFn: () => api<Paginated<Product>>('/products', { query: filters }),
+    queryFn: ({ signal }) =>
+      api<Paginated<Product>>('/products', { query: filters, signal }),
     placeholderData: keepPreviousData,
   });
 

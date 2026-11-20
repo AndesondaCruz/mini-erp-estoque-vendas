@@ -696,3 +696,28 @@ O teste "venda às 23h30 em Fortaleza conta no dia local" foi rodado com `REPORT
 
 3. **Como você achou o bug do aviso que sumia?**
    O teste esperava o aviso na tela de login e não encontrou. Imprimi o `state` da navegação e ele tinha `from: "/minha-senha"`: quem tinha levado ao login era o `RequireAuth`, não a tela. Eram dois redirecionamentos disputando. Em vez de mexer na ordem das chamadas, deixei um só responsável e coloquei o aviso num estado compartilhado.
+
+## Limpezas pós-Fase 9: AbortSignal, rotas garantidas pelo tipo e Dependabot
+
+### Conceitos usados
+
+- **Cancelamento pelo React Query.** Quando a chave de uma consulta muda (uma nova busca), a consulta antiga fica sem observador. Se o `queryFn` usou o `signal`, o React Query aborta a requisição dela. Sem o `signal`, a requisição continua até o fim e a resposta é jogada fora.
+- **Testar o cancelamento.** O teste prende a primeira resposta no MSW até o `request.signal` ser abortado (com um limite de 1 s, para falhar em vez de travar) e confere `signal.aborted`. Sem o `signal` no `queryFn`, o teste falha: a prova vai nos dois sentidos.
+- **O compilador como teste.** `as const` guarda os caminhos do menu como tipos literais; `Record<SectionPath, ...>` exige uma entrada para cada um. Uma regra que se escreve em tipo dispensa teste de execução e falha antes do deploy.
+- **Estreitamento por campo literal.** Em `item.to === '/' ? [] : [...]`, o TypeScript sabe que, no segundo ramo, `item.to` é um dos caminhos de seção, porque `to` é um literal em cada item da tupla.
+
+### Lição do processo
+
+- Um script de substituição por expressão regular trocou só 6 de 17 trechos: `[^>]+` para no primeiro `>` de `Paginated<Product>`. Contar o que sobrou com `grep` mostrou a falha na hora. Os 11 restantes foram feitos à mão, mais fáceis de revisar.
+- O comentário que eu tinha escrito no `ProductPicker` ("busca a cada tecla") estava errado: a busca dispara no Enter. Ler o componente antes de escrever o teste corrigiu o comentário e a expectativa.
+
+### Perguntas de entrevista
+
+1. **O que acontece com uma requisição quando o usuário sai da tela antes da resposta?**
+   Se o `queryFn` repassa o `signal` ao `fetch`, o React Query aborta a requisição: a conexão é fechada e nada é processado no cliente. Sem isso, a requisição termina e a resposta é descartada, gastando rede e podendo disparar efeitos tardios, como um refresh de token num teste seguinte.
+
+2. **Como você garante que todo item do menu tem uma página?**
+   Pelo tipo. O menu é declarado `as const`, o tipo das seções é derivado dele e o mapa de páginas é um `Record` desse tipo. Um item sem página é um erro de compilação, que aparece no CI antes do deploy.
+
+3. **Por que você não aceitou o PR do Dependabot que atualizava o TypeScript?**
+   Porque o repositório usa uma versão só nos dois projetos, e o back-end ainda não pode ir para o 7: o `@nestjs/swagger` declara compatibilidade só até o 6. Atualizar só o front criaria duas versões para manter. Fechei o PR com o motivo e configurei o Dependabot para ignorar o major, com um comentário no arquivo apontando a decisão.

@@ -130,7 +130,8 @@ export function MovementFormPage() {
   // prévia do ajuste e o "disponível" usarem o número mais recente possível.
   const product = useQuery({
     queryKey: ['products', 'detail', selectedId],
-    queryFn: () => api<Product>(`/products/${selectedId}`),
+    queryFn: ({ signal }) =>
+      api<Product>(`/products/${selectedId}`, { signal }),
     enabled: selectedId !== '',
   });
 

@@ -16,8 +16,9 @@ export function HomePage() {
   const alerts = useQuery({
     queryKey: ['stock-alerts', 'top', TOP],
     // A API já ordena pela maior falta: a primeira página é o "top".
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       api<Paginated<StockAlert>>('/stock/alerts', {
+        signal,
         query: { pageSize: TOP },
       }),
   });
