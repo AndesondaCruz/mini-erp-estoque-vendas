@@ -1,32 +1,101 @@
+import type { ComponentType } from 'react';
 import type { RouteObject } from 'react-router';
 import { RequireAuth } from './auth/RequireAuth';
 import { Layout } from './components/Layout';
+import { Spinner } from './components/Spinner';
 import { MANAGERS, NAV_ITEMS, type SectionPath } from './lib/navigation';
-import { ChangePasswordPage } from './pages/account/ChangePasswordPage';
-import { AuditPage } from './pages/audit/AuditPage';
-import { CategoriesPage } from './pages/categories/CategoriesPage';
-import { HomePage } from './pages/HomePage';
-import { LoginPage } from './pages/LoginPage';
 import { NotFoundPage } from './pages/NotFoundPage';
-import { ProductFormPage } from './pages/products/ProductFormPage';
-import { ProductsPage } from './pages/products/ProductsPage';
-import { ReportsPage } from './pages/reports/ReportsPage';
-import { NewSalePage } from './pages/sales/NewSalePage';
-import { SaleDetailPage } from './pages/sales/SaleDetailPage';
-import { SalesPage } from './pages/sales/SalesPage';
-import { MovementFormPage } from './pages/stock/MovementFormPage';
-import { StockPage } from './pages/stock/StockPage';
-import { SupplierFormPage } from './pages/suppliers/SupplierFormPage';
-import { SuppliersPage } from './pages/suppliers/SuppliersPage';
-import { UserFormPage } from './pages/users/UserFormPage';
-import { UsersPage } from './pages/users/UsersPage';
+
+/**
+ * Página carregada sob demanda (divisão do bundle por rota, decisão 88).
+ * O import() dinâmico vira um arquivo .js próprio no build, baixado só
+ * quando a rota é aberta. Com o `lazy` do React Router, a tela atual fica
+ * visível enquanto a próxima carrega, sem um "carregando" a cada clique.
+ */
+function page<M>(
+  load: () => Promise<M>,
+  pick: (module: M) => ComponentType,
+): Pick<RouteObject, 'lazy'> {
+  return { lazy: async () => ({ Component: pick(await load()) }) };
+}
+
+const pages = {
+  login: page(
+    () => import('./pages/LoginPage'),
+    (m) => m.LoginPage,
+  ),
+  home: page(
+    () => import('./pages/HomePage'),
+    (m) => m.HomePage,
+  ),
+  changePassword: page(
+    () => import('./pages/account/ChangePasswordPage'),
+    (m) => m.ChangePasswordPage,
+  ),
+  products: page(
+    () => import('./pages/products/ProductsPage'),
+    (m) => m.ProductsPage,
+  ),
+  productForm: page(
+    () => import('./pages/products/ProductFormPage'),
+    (m) => m.ProductFormPage,
+  ),
+  categories: page(
+    () => import('./pages/categories/CategoriesPage'),
+    (m) => m.CategoriesPage,
+  ),
+  suppliers: page(
+    () => import('./pages/suppliers/SuppliersPage'),
+    (m) => m.SuppliersPage,
+  ),
+  supplierForm: page(
+    () => import('./pages/suppliers/SupplierFormPage'),
+    (m) => m.SupplierFormPage,
+  ),
+  sales: page(
+    () => import('./pages/sales/SalesPage'),
+    (m) => m.SalesPage,
+  ),
+  newSale: page(
+    () => import('./pages/sales/NewSalePage'),
+    (m) => m.NewSalePage,
+  ),
+  saleDetail: page(
+    () => import('./pages/sales/SaleDetailPage'),
+    (m) => m.SaleDetailPage,
+  ),
+  reports: page(
+    () => import('./pages/reports/ReportsPage'),
+    (m) => m.ReportsPage,
+  ),
+  stock: page(
+    () => import('./pages/stock/StockPage'),
+    (m) => m.StockPage,
+  ),
+  movementForm: page(
+    () => import('./pages/stock/MovementFormPage'),
+    (m) => m.MovementFormPage,
+  ),
+  users: page(
+    () => import('./pages/users/UsersPage'),
+    (m) => m.UsersPage,
+  ),
+  userForm: page(
+    () => import('./pages/users/UserFormPage'),
+    (m) => m.UserFormPage,
+  ),
+  audit: page(
+    () => import('./pages/audit/AuditPage'),
+    (m) => m.AuditPage,
+  ),
+};
 
 /** Rotas de criar/editar: só quem escreve no cadastro (ADMIN e GERENTE). */
-const formRoutes = (form: React.ReactElement): RouteObject => ({
+const formRoutes = (form: Pick<RouteObject, 'lazy'>): RouteObject => ({
   element: <RequireAuth roles={MANAGERS} />,
   children: [
-    { path: 'novo', element: form },
-    { path: ':id/editar', element: form },
+    { path: 'novo', ...form },
+    { path: ':id/editar', ...form },
   ],
 });
 
@@ -34,35 +103,35 @@ const formRoutes = (form: React.ReactElement): RouteObject => ({
 // um item novo no menu sem página aqui não compila.
 const SECTION_PAGES: Record<SectionPath, RouteObject[]> = {
   '/produtos': [
-    { index: true, element: <ProductsPage /> },
-    formRoutes(<ProductFormPage />),
+    { index: true, ...pages.products },
+    formRoutes(pages.productForm),
   ],
-  '/categorias': [{ index: true, element: <CategoriesPage /> }],
+  '/categorias': [{ index: true, ...pages.categories }],
   '/fornecedores': [
-    { index: true, element: <SuppliersPage /> },
-    formRoutes(<SupplierFormPage />),
+    { index: true, ...pages.suppliers },
+    formRoutes(pages.supplierForm),
   ],
   // Os três papéis vendem. O VENDEDOR só vê as próprias vendas (filtro na
   // API) e o botão de cancelar só aparece para ADMIN e GERENTE.
   '/vendas': [
-    { index: true, element: <SalesPage /> },
-    { path: 'nova', element: <NewSalePage /> },
-    { path: ':id', element: <SaleDetailPage /> },
+    { index: true, ...pages.sales },
+    { path: 'nova', ...pages.newSale },
+    { path: ':id', ...pages.saleDetail },
   ],
   // Só ADMIN e GERENTE (NAV_ITEMS), como na API.
-  '/relatorios': [{ index: true, element: <ReportsPage /> }],
+  '/relatorios': [{ index: true, ...pages.reports }],
   // A seção inteira já é só de ADMIN e GERENTE (NAV_ITEMS).
   '/estoque': [
-    { index: true, element: <StockPage /> },
-    { path: 'nova', element: <MovementFormPage /> },
+    { index: true, ...pages.stock },
+    { path: 'nova', ...pages.movementForm },
   ],
   // Usuários e auditoria: só ADMIN (NAV_ITEMS), como na API.
   '/usuarios': [
-    { index: true, element: <UsersPage /> },
-    { path: 'novo', element: <UserFormPage /> },
-    { path: ':id/editar', element: <UserFormPage /> },
+    { index: true, ...pages.users },
+    { path: 'novo', ...pages.userForm },
+    { path: ':id/editar', ...pages.userForm },
   ],
-  '/auditoria': [{ index: true, element: <AuditPage /> }],
+  '/auditoria': [{ index: true, ...pages.audit }],
 };
 
 // Cada seção do menu vira uma rota protegida pelos papéis da própria seção.
@@ -79,17 +148,24 @@ const sections: RouteObject[] = NAV_ITEMS.flatMap((item) =>
       ],
 );
 
+// Enquanto o primeiro arquivo de página baixa, ao abrir o app. Nas
+// navegações seguintes, a tela anterior continua visível.
+const hydrateFallbackElement = <Spinner label="Carregando" />;
+
+// Layout, guardas e as páginas de 404 e 403 ficam no pacote principal:
+// são pequenos e aparecem em qualquer navegação.
 export const routes: RouteObject[] = [
-  { path: '/login', element: <LoginPage /> },
+  { path: '/login', hydrateFallbackElement, ...pages.login },
   {
     element: <RequireAuth />,
+    hydrateFallbackElement,
     children: [
       {
         element: <Layout />,
         children: [
-          { index: true, element: <HomePage /> },
+          { index: true, ...pages.home },
           // Fora do menu: cada papel troca a própria senha pelo cabeçalho.
-          { path: 'minha-senha', element: <ChangePasswordPage /> },
+          { path: 'minha-senha', ...pages.changePassword },
           ...sections,
         ],
       },

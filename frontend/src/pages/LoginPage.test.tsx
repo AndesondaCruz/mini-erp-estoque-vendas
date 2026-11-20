@@ -5,9 +5,12 @@ import { renderApp } from '../test/render';
 
 async function fillAndSubmit(email: string, password: string) {
   const user = userEvent.setup();
-  if (email) await user.type(await screen.findByLabelText('E-mail'), email);
+  // A página de login é carregada sob demanda (divisão por rota): espera o
+  // formulário aparecer antes de interagir, mesmo sem digitar nada.
+  const submit = await screen.findByRole('button', { name: 'Entrar' });
+  if (email) await user.type(screen.getByLabelText('E-mail'), email);
   if (password) await user.type(screen.getByLabelText('Senha'), password);
-  await user.click(screen.getByRole('button', { name: 'Entrar' }));
+  await user.click(submit);
 }
 
 describe('LoginPage', () => {
