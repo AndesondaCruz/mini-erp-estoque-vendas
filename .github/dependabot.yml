@@ -24,6 +24,11 @@ updates:
       # Os tipos do Node acompanham a versão do runtime (Node 22, ver .nvmrc).
       - dependency-name: '@types/node'
         update-types: [version-update:semver-major]
+      # Uma versão só de TypeScript no repositório (decisões 31 e 87 do plano).
+      # O 7 espera o @nestjs/swagger, que aceita só ^5.5.0 || ^6.0.0, e será
+      # migrado nos dois projetos juntos.
+      - dependency-name: typescript
+        update-types: [version-update:semver-major]
 
   - package-ecosystem: npm
     directory: /frontend
@@ -38,6 +43,10 @@ updates:
         patterns: ['vitest', 'jsdom', '@testing-library/*']
       minor-and-patch:
         update-types: [minor, patch]
+    ignore:
+      # Mesmo motivo do back-end: o TypeScript sobe nos dois projetos juntos.
+      - dependency-name: typescript
+        update-types: [version-update:semver-major]
 
   - package-ecosystem: docker
     directory: /backend
