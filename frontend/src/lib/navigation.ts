@@ -22,6 +22,7 @@ export const NAV_ITEMS: NavItem[] = [
   { to: '/estoque', label: 'Estoque', roles: ['ADMIN', 'GERENTE'] },
   { to: '/relatorios', label: 'Relatórios', roles: ['ADMIN', 'GERENTE'] },
   { to: '/usuarios', label: 'Usuários', roles: ['ADMIN'] },
+  { to: '/auditoria', label: 'Auditoria', roles: ['ADMIN'] },
 ];
 
 export function navItemsFor(role: Role): NavItem[] {

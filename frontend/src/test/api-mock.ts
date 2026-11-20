@@ -1,6 +1,7 @@
 import { http, HttpResponse } from 'msw';
 import { setupServer } from 'msw/node';
 import type {
+  AuditLog,
   AuthResponse,
   Category,
   Product,
@@ -102,6 +103,7 @@ export const handlers = [
   ...stockHandlers(),
   ...salesHandlers(),
   ...reportsHandlers(),
+  ...accountHandlers(),
 ];
 
 export const server = setupServer(...handlers);
@@ -112,6 +114,7 @@ export function resetMockState(): void {
   mockState.refreshCalls = 0;
   mockState.password = 'senha-certa';
   resetCatalog();
+  resetAccounts();
 }
 
 // ---------------------------------------------------------------------------
@@ -970,6 +973,222 @@ function reportsHandlers() {
         totalCostValue: money(categories.reduce((sum, c) => sum + c.cost, 0)),
         totalSaleValue: money(categories.reduce((sum, c) => sum + c.sale, 0)),
       });
+    }),
+  ];
+}
+
+// ---------------------------------------------------------------------------
+// Usuários, auditoria e troca de senha. Imita as regras do back-end que mudam
+// a tela: só ADMIN, ninguém muda o próprio papel nem se desativa, sempre um
+// ADMIN ativo, e-mail único, e a troca de senha encerra a sessão.
+
+export const accounts: {
+  users: User[];
+  auditLogs: AuditLog[];
+  /** Último corpo de PATCH /auth/me/password. */
+  passwordBody: unknown;
+} = { users: [], auditLogs: [], passwordBody: null };
+
+function resetAccounts(): void {
+  // Os três primeiros são os mesmos de makeUser: a sessão do ADMIN de teste
+  // é "admin-1", então a própria linha dele aparece na lista.
+  accounts.users = [
+    makeUser('ADMIN'),
+    makeUser('GERENTE'),
+    makeUser('VENDEDOR'),
+    {
+      id: 'vendedor-antigo',
+      name: 'Carlos Antigo',
+      email: 'carlos@loja.com',
+      role: 'VENDEDOR',
+      active: false,
+    },
+  ];
+  const ref = (id: string) => {
+    const u = accounts.users.find((user) => user.id === id)!;
+    return { id: u.id, name: u.name, email: u.email };
+  };
+  accounts.auditLogs = [
+    {
+      id: 'log-preco',
+      action: 'PRODUCT_PRICE_CHANGED',
+      user: ref('gerente-1'),
+      entity: 'Product',
+      entityId: 'prod-cafe',
+      before: { id: 'prod-cafe', costPrice: '3.00', salePrice: '5.50' },
+      after: { id: 'prod-cafe', costPrice: '3.00', salePrice: '6.00' },
+      metadata: null,
+      ip: '10.0.0.5',
+      createdAt: '2026-11-19T15:00:00.000Z',
+    },
+    {
+      id: 'log-negado',
+      action: 'ACCESS_DENIED',
+      user: ref('vendedor-1'),
+      entity: null,
+      entityId: null,
+      before: null,
+      after: null,
+      metadata: {
+        method: 'GET',
+        route: '/api/v1/users',
+        role: 'VENDEDOR',
+        requiredRoles: ['ADMIN'],
+      },
+      ip: '10.0.0.9',
+      createdAt: '2026-11-19T10:00:00.000Z',
+    },
+    {
+      id: 'log-papel',
+      action: 'USER_UPDATED',
+      user: ref('admin-1'),
+      entity: 'User',
+      entityId: 'gerente-1',
+      before: { id: 'gerente-1', name: 'Pessoa GERENTE', role: 'VENDEDOR' },
+      after: { id: 'gerente-1', name: 'Pessoa GERENTE', role: 'GERENTE' },
+      metadata: null,
+      ip: '10.0.0.1',
+      createdAt: '2026-11-18T12:00:00.000Z',
+    },
+    {
+      id: 'log-login-recusado',
+      action: 'LOGIN_FAILED',
+      user: null,
+      entity: null,
+      entityId: null,
+      before: null,
+      after: null,
+      metadata: { email: 'ninguem@loja.com' },
+      ip: '10.0.0.7',
+      createdAt: '2026-11-17T09:00:00.000Z',
+    },
+  ];
+  accounts.passwordBody = null;
+}
+resetAccounts();
+
+function accountHandlers() {
+  const adminOnly = (request: Request) => {
+    if (!authorized(request)) return apiError(401, 'Token inválido');
+    if (mockState.session!.role !== 'ADMIN') {
+      return apiError(403, 'Seu perfil não tem permissão para esta ação');
+    }
+    return null;
+  };
+  const query = (request: Request) => {
+    catalog.lastQuery = new URL(request.url).searchParams;
+    return catalog.lastQuery;
+  };
+  const emailTaken = (email: string, exceptId?: string) =>
+    accounts.users.some((u) => u.email === email && u.id !== exceptId);
+
+  return [
+    http.get('*/api/v1/users', ({ request }) => {
+      const denied = adminOnly(request);
+      if (denied) return denied;
+      const q = query(request);
+      const sort = (q.get('sort') ?? 'name') as 'name' | 'email' | 'role';
+      const direction = q.get('order') === 'desc' ? -1 : 1;
+      const items = accounts.users
+        .filter(activeFilter(q))
+        .filter((u) => !q.get('role') || u.role === q.get('role'))
+        .filter(
+          (u) =>
+            matches(u.name, q.get('search')) ||
+            matches(u.email, q.get('search')),
+        )
+        .sort((a, b) => a[sort].localeCompare(b[sort]) * direction);
+      return HttpResponse.json(paginate(items, q));
+    }),
+    http.get('*/api/v1/users/:id', ({ request, params }) => {
+      const denied = adminOnly(request);
+      if (denied) return denied;
+      const user = accounts.users.find((u) => u.id === params.id);
+      if (!user) return apiError(404, 'Usuário não encontrado');
+      return HttpResponse.json(user);
+    }),
+    http.post('*/api/v1/users', async ({ request }) => {
+      const denied = adminOnly(request);
+      if (denied) return denied;
+      const data = (await request.json()) as Omit<User, 'id' | 'active'> & {
+        password: string;
+      };
+      catalog.lastBody = data;
+      if (emailTaken(data.email)) return apiError(409, 'E-mail já cadastrado');
+      const { password: _password, ...rest } = data;
+      const user = { id: newId('user'), active: true, ...rest };
+      accounts.users.push(user);
+      return HttpResponse.json(user, { status: 201 });
+    }),
+    http.patch('*/api/v1/users/:id', async ({ request, params }) => {
+      const denied = adminOnly(request);
+      if (denied) return denied;
+      const changes = (await request.json()) as Partial<User>;
+      catalog.lastBody = changes;
+      const user = accounts.users.find((u) => u.id === params.id);
+      if (!user) return apiError(404, 'Usuário não encontrado');
+      const isSelf = user.id === mockState.session!.id;
+      const losesRole =
+        changes.role !== undefined && changes.role !== user.role;
+      const deactivates = changes.active === false && user.active;
+      if (isSelf && (losesRole || deactivates)) {
+        return apiError(
+          403,
+          'Você não pode alterar o próprio papel nem desativar a si mesmo',
+        );
+      }
+      const otherActiveAdmins = accounts.users.filter(
+        (u) => u.role === 'ADMIN' && u.active && u.id !== user.id,
+      );
+      if (
+        user.role === 'ADMIN' &&
+        user.active &&
+        ((losesRole && changes.role !== 'ADMIN') || deactivates) &&
+        otherActiveAdmins.length === 0
+      ) {
+        return apiError(409, 'É preciso manter pelo menos um ADMIN ativo');
+      }
+      if (changes.email && emailTaken(changes.email, user.id)) {
+        return apiError(409, 'E-mail já cadastrado');
+      }
+      Object.assign(user, changes);
+      return HttpResponse.json(user);
+    }),
+
+    http.get('*/api/v1/audit-logs', ({ request }) => {
+      const denied = adminOnly(request);
+      if (denied) return denied;
+      const q = query(request);
+      const from = q.get('from');
+      const to = q.get('to');
+      const direction = q.get('order') === 'asc' ? 1 : -1;
+      const items = accounts.auditLogs
+        .filter((l) => !q.get('userId') || l.user?.id === q.get('userId'))
+        .filter((l) => !q.get('action') || l.action === q.get('action'))
+        .filter((l) => !q.get('entity') || l.entity === q.get('entity'))
+        // ISO em UTC compara certo como texto; to é exclusivo, como na API.
+        .filter((l) => !from || l.createdAt >= from)
+        .filter((l) => !to || l.createdAt < to)
+        .sort((a, b) => a.createdAt.localeCompare(b.createdAt) * direction);
+      return HttpResponse.json(paginate(items, q));
+    }),
+
+    http.patch('*/api/v1/auth/me/password', async ({ request }) => {
+      if (!authorized(request)) return apiError(401, 'Token inválido');
+      const body = (await request.json()) as {
+        currentPassword: string;
+        newPassword: string;
+      };
+      accounts.passwordBody = body;
+      // 400, e não 401: um 401 dispararia a renovação automática do token.
+      if (body.currentPassword !== mockState.password) {
+        return apiError(400, 'Senha atual incorreta');
+      }
+      mockState.password = body.newPassword;
+      // Todas as sessões encerradas: o cookie de refresh e o token atual.
+      mockState.session = null;
+      mockState.validToken = null;
+      return new HttpResponse(null, { status: 204 });
     }),
   ];
 }

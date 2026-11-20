@@ -19,13 +19,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient();
   const [status, setStatus] = useState<AuthStatus>('loading');
   const [user, setUser] = useState<User | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
-  const endSession = useCallback(() => {
-    tokenStore.clear();
-    setUser(null);
-    setStatus('anonymous');
-    queryClient.clear();
-  }, [queryClient]);
+  // `reason` vira o aviso da tela de login. Ele mora aqui, e não no state da
+  // navegação, porque quem leva ao login é o RequireAuth ao perceber a sessão
+  // encerrada; uma navegação feita pela tela concorreria com ele.
+  const endSession = useCallback(
+    (reason?: string) => {
+      tokenStore.clear();
+      setUser(null);
+      setStatus('anonymous');
+      setNotice(reason ?? null);
+      queryClient.clear();
+    },
+    [queryClient],
+  );
 
   // Ao abrir ou recarregar a página, o token em memória não existe mais:
   // a sessão volta pelo cookie de refresh, se ele ainda for válido.
@@ -54,6 +62,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     tokenStore.set(session.accessToken);
     setUser(session.user);
     setStatus('authenticated');
+    setNotice(null);
   }, []);
 
   const logout = useCallback(async () => {
@@ -65,8 +74,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [endSession]);
 
   const value = useMemo(
-    () => ({ status, user, login, logout }),
-    [status, user, login, logout],
+    () => ({ status, user, notice, login, logout, endSession }),
+    [status, user, notice, login, logout, endSession],
   );
   return <AuthContext value={value}>{children}</AuthContext>;
 }

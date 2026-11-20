@@ -1,4 +1,4 @@
-import { NavLink, Outlet } from 'react-router';
+import { Link, NavLink, Outlet } from 'react-router';
 import { useAuth } from '../auth/auth-context';
 import { navItemsFor } from '../lib/navigation';
 import { ROLE_LABELS } from '../lib/types';
@@ -27,6 +27,12 @@ export function Layout() {
                 {ROLE_LABELS[user.role]}
               </span>
             </span>
+            <Link
+              to="/minha-senha"
+              className="text-indigo-700 underline-offset-2 hover:underline"
+            >
+              Trocar senha
+            </Link>
             <button
               type="button"
               onClick={() => void logout()}

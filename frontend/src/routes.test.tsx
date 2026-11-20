@@ -67,6 +67,7 @@ describe('rotas e guarda por papel', () => {
         'Estoque',
         'Relatórios',
         'Usuários',
+        'Auditoria',
       ],
     ],
   ] as const)('menu do %s mostra só o que ele acessa', async (role, items) => {
@@ -84,6 +85,17 @@ describe('rotas e guarda por papel', () => {
     ).toBeVisible();
     await expectNoA11yViolations(container);
   });
+
+  it.each(['/usuarios/novo', '/auditoria'])(
+    'GERENTE abrindo %s pelo endereço: página 403',
+    async (path) => {
+      signedInAs('GERENTE');
+      renderApp(path);
+      expect(
+        await screen.findByRole('heading', { name: 'Sem permissão' }),
+      ).toBeVisible();
+    },
+  );
 
   it('sair encerra a sessão e volta para o login', async () => {
     signedInAs('ADMIN');
