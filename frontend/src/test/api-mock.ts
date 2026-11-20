@@ -5,6 +5,7 @@ import type {
   Category,
   Product,
   Role,
+  Sale,
   StockMovement,
   Supplier,
   User,
@@ -99,6 +100,7 @@ export const handlers = [
   }),
   ...catalogHandlers(),
   ...stockHandlers(),
+  ...salesHandlers(),
 ];
 
 export const server = setupServer(...handlers);
@@ -125,6 +127,14 @@ export const catalog: {
   suppliers: Supplier[];
   products: StoredProduct[];
   movements: StockMovement[];
+  sales: StoredSale[];
+  /** Idempotency-Key de cada POST /sales recebido, na ordem. */
+  saleKeys: (string | null)[];
+  /**
+   * Simula a rede caindo DEPOIS de o servidor gravar: o próximo POST /sales
+   * é processado de verdade, mas a resposta não chega (TypeError no fetch).
+   */
+  dropNextSaleResponse: boolean;
   /** Última query string e último corpo recebidos, para os testes conferirem. */
   lastQuery: URLSearchParams | null;
   /** Último caminho de listagem chamado (ex.: /products/x/movements). */
@@ -135,6 +145,9 @@ export const catalog: {
   suppliers: [],
   products: [],
   movements: [],
+  sales: [],
+  saleKeys: [],
+  dropNextSaleResponse: false,
   lastPath: null,
   lastQuery: null,
   lastBody: null,
@@ -217,6 +230,60 @@ function resetCatalog(): void {
       createdAt: '2026-11-15T12:00:00.000Z',
     },
   ];
+  catalog.sales = [
+    {
+      id: 'venda-1',
+      key: 'chave-semente-1',
+      number: 1,
+      seller: { id: 'vendedor-1', name: 'Pessoa VENDEDOR' },
+      status: 'CONCLUIDA',
+      total: '14.90',
+      items: [
+        {
+          product: {
+            id: 'prod-sabao',
+            sku: 'SAB-1KG',
+            name: 'Sabão em pó 1 kg',
+          },
+          quantity: 1,
+          unitPrice: '14.90',
+          unitCost: '9.90',
+          subtotal: '14.90',
+        },
+      ],
+      createdAt: '2026-11-12T13:00:00.000Z',
+      canceledAt: null,
+      canceledBy: null,
+      cancelReason: null,
+    },
+    {
+      id: 'venda-2',
+      key: 'chave-semente-2',
+      number: 2,
+      seller: { id: 'gerente-1', name: 'Pessoa GERENTE' },
+      status: 'CANCELADA',
+      total: '11.00',
+      items: [
+        {
+          product: {
+            id: 'prod-cerveja',
+            sku: 'CER-350',
+            name: 'Cerveja lata 350 ml',
+          },
+          quantity: 2,
+          unitPrice: '5.50',
+          unitCost: '3.20',
+          subtotal: '11.00',
+        },
+      ],
+      createdAt: '2026-11-16T13:00:00.000Z',
+      canceledAt: '2026-11-16T14:00:00.000Z',
+      canceledBy: { id: 'admin-1', name: 'Pessoa ADMIN' },
+      cancelReason: 'Cliente desistiu',
+    },
+  ];
+  catalog.saleKeys = [];
+  catalog.dropNextSaleResponse = false;
   catalog.lastQuery = null;
   catalog.lastPath = null;
   catalog.lastBody = null;
@@ -534,6 +601,196 @@ function stockHandlers() {
       };
       catalog.movements.push(movement);
       return HttpResponse.json(movement, { status: 201 });
+    }),
+  ];
+}
+
+// ---------------------------------------------------------------------------
+// Vendas. Mesmas regras do SalesService que mudam a tela: VENDEDOR só vê as
+// próprias (e 404 nas dos outros), unitCost some para ele, a venda é tudo ou
+// nada, a mesma Idempotency-Key com os mesmos itens devolve a venda já criada
+// (200), e só ADMIN e GERENTE cancelam.
+
+interface StoredSale extends Sale {
+  key: string;
+}
+
+const cents = (value: string) => Math.round(Number(value) * 100);
+const money = (value: number) => (value / 100).toFixed(2);
+
+function toSale(stored: StoredSale): Sale {
+  const { key: _key, ...sale } = stored;
+  if (mockState.session?.role !== 'VENDEDOR') return sale;
+  return {
+    ...sale,
+    items: sale.items.map(({ unitCost: _cost, ...item }) => item),
+  };
+}
+
+function salesHandlers() {
+  const guard = (request: Request, roles?: Role[]) => {
+    if (!authorized(request)) return apiError(401, 'Token inválido');
+    if (roles && !roles.includes(mockState.session!.role)) {
+      return apiError(403, 'Você não tem permissão para esta ação');
+    }
+    return null;
+  };
+  /** VENDEDOR não enxerga venda de outro: 404, como no back-end (IDOR). */
+  const visible = (sale: StoredSale | undefined) =>
+    sale &&
+    (mockState.session!.role !== 'VENDEDOR' ||
+      sale.seller.id === mockState.session!.id)
+      ? sale
+      : undefined;
+
+  type Item = { productId: string; quantity: number };
+  const sameItems = (sale: StoredSale, items: Item[]) =>
+    sale.items.length === items.length &&
+    items.every((item) =>
+      sale.items.some(
+        (s) => s.product.id === item.productId && s.quantity === item.quantity,
+      ),
+    );
+
+  return [
+    http.get('*/api/v1/sales', ({ request }) => {
+      const denied = guard(request);
+      if (denied) return denied;
+      const url = new URL(request.url);
+      const q = url.searchParams;
+      catalog.lastQuery = q;
+      catalog.lastPath = '/sales';
+      const sort = (q.get('sort') ?? 'createdAt') as
+        'createdAt' | 'number' | 'total';
+      const direction = q.get('order') === 'asc' ? 1 : -1;
+      const from = q.get('from');
+      const to = q.get('to');
+      const items = catalog.sales
+        .filter((s) => visible(s))
+        .filter((s) => !q.get('status') || s.status === q.get('status'))
+        .filter((s) => !from || s.createdAt >= new Date(from).toISOString())
+        .filter((s) => !to || s.createdAt < new Date(to).toISOString())
+        .sort((a, b) => {
+          const diff =
+            sort === 'total'
+              ? cents(a.total) - cents(b.total)
+              : sort === 'number'
+                ? a.number - b.number
+                : a.createdAt.localeCompare(b.createdAt);
+          return diff * direction;
+        });
+      return HttpResponse.json(paginate(items.map(toSale), q));
+    }),
+    http.get('*/api/v1/sales/:id', ({ request, params }) => {
+      const denied = guard(request);
+      if (denied) return denied;
+      const sale = visible(catalog.sales.find((s) => s.id === params.id));
+      if (!sale) return apiError(404, 'Venda não encontrada');
+      return HttpResponse.json(toSale(sale));
+    }),
+    http.post('*/api/v1/sales', async ({ request }) => {
+      const denied = guard(request);
+      if (denied) return denied;
+      const key = request.headers.get('Idempotency-Key');
+      catalog.saleKeys.push(key);
+      if (!key) {
+        return apiError(400, 'Header Idempotency-Key obrigatório');
+      }
+      const { items } = (await request.json()) as { items: Item[] };
+      catalog.lastBody = { items };
+      const seller = mockState.session!;
+
+      const drop = catalog.dropNextSaleResponse;
+      catalog.dropNextSaleResponse = false;
+      const respond = (sale: StoredSale, status: number) =>
+        drop
+          ? HttpResponse.error()
+          : HttpResponse.json(toSale(sale), { status });
+
+      // Retry: mesma chave, mesmo vendedor e mesmos itens.
+      const existing = catalog.sales.find((s) => s.key === key);
+      if (existing) {
+        if (existing.seller.id !== seller.id || !sameItems(existing, items)) {
+          return apiError(
+            409,
+            'Idempotency-Key já usada em outra venda; gere uma chave nova',
+          );
+        }
+        return respond(existing, 200);
+      }
+
+      // Confere tudo antes de baixar qualquer coisa: tudo ou nada.
+      for (const item of items) {
+        const product = catalog.products.find((p) => p.id === item.productId);
+        if (!product) return apiError(404, 'Produto não encontrado');
+        if (!product.active) {
+          return apiError(409, 'Produto inativo não pode ter saída');
+        }
+        if (item.quantity > product.currentStock) {
+          return apiError(409, 'Estoque insuficiente', {
+            productId: product.id,
+            requested: item.quantity,
+            available: product.currentStock,
+          });
+        }
+      }
+
+      let total = 0;
+      const saleItems = items.map((item) => {
+        const product = catalog.products.find((p) => p.id === item.productId)!;
+        product.currentStock -= item.quantity;
+        product.lowStock = product.currentStock <= product.minStock;
+        const subtotal = cents(product.salePrice) * item.quantity;
+        total += subtotal;
+        return {
+          product: { id: product.id, sku: product.sku, name: product.name },
+          quantity: item.quantity,
+          unitPrice: product.salePrice,
+          unitCost: product.costPrice,
+          subtotal: money(subtotal),
+        };
+      });
+      const sale: StoredSale = {
+        id: newId('venda'),
+        key,
+        number: Math.max(0, ...catalog.sales.map((s) => s.number)) + 1,
+        seller: { id: seller.id, name: seller.name },
+        status: 'CONCLUIDA',
+        total: money(total),
+        items: saleItems,
+        createdAt: new Date().toISOString(),
+        canceledAt: null,
+        canceledBy: null,
+        cancelReason: null,
+      };
+      catalog.sales.push(sale);
+      return respond(sale, 201);
+    }),
+    http.post('*/api/v1/sales/:id/cancel', async ({ request, params }) => {
+      const denied = guard(request, ['ADMIN', 'GERENTE']);
+      if (denied) return denied;
+      const { reason } = (await request.json()) as { reason: string };
+      catalog.lastBody = { reason };
+      const sale = catalog.sales.find((s) => s.id === params.id);
+      if (!sale) return apiError(404, 'Venda não encontrada');
+      if (sale.status === 'CANCELADA') {
+        return apiError(409, 'Venda já cancelada');
+      }
+      for (const item of sale.items) {
+        const product = catalog.products.find((p) => p.id === item.product.id)!;
+        product.currentStock += item.quantity;
+        product.lowStock = product.currentStock <= product.minStock;
+      }
+      Object.assign(sale, {
+        status: 'CANCELADA',
+        canceledAt: new Date().toISOString(),
+        canceledBy: {
+          id: mockState.session!.id,
+          name: mockState.session!.name,
+        },
+        cancelReason: reason,
+      });
+      return HttpResponse.json(toSale(sale));
     }),
   ];
 }

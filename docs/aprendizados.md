@@ -542,3 +542,42 @@ O teste "venda às 23h30 em Fortaleza conta no dia local" foi rodado com `REPORT
 
 3. **Por que o filtro "até 15/11" manda 16/11 para a API?**
    Porque o `to` da API é exclusivo (`createdAt < to`). Mandar 15/11 00:00 deixaria o dia 15 inteiro de fora. Um intervalo meio aberto evita a dúvida sobre "23:59:59.999" e encaixa períodos seguidos sem sobreposição.
+
+## Fase 9a: telas de vendas
+
+### Conceitos usados
+
+- **Idempotência do lado do cliente.** A API já deduplicava vendas pela `Idempotency-Key`, mas quem decide que uma requisição "é a mesma" é o cliente. A chave fica num `useRef` (`keyRef`), nasce no primeiro envio (`keyRef.current ??= newIdempotencyKey()`) e é reusada se a rede cair. Se o carrinho muda, a chave é apagada, porque já é outra venda. `useRef`, e não `useState`, porque trocar a chave não precisa redesenhar a tela.
+- **Erro de rede é diferente de erro da API.** Um 409 é uma resposta: o servidor decidiu e não gravou nada. Um `TypeError` do `fetch` significa que não houve resposta, e a venda pode ter sido gravada ou não. A tela diz isso com todas as letras e explica que tentar de novo é seguro.
+- **Dinheiro em centavos.** `0.1 * 3` dá `0.30000000000000004` em JavaScript. A prévia do total converte "5.50" para 550 centavos e soma inteiros. O total oficial continua vindo do servidor.
+- **Foco depois de mudar a tela.** Ao abrir o cancelamento, o foco vai para o campo do motivo. Ao desistir, volta para o botão "Cancelar venda". Sem isso, o foco cairia no `<body>`, e quem usa teclado recomeçaria do topo.
+- **Mensagem que sobrevive à mudança de estado.** No 409 "Venda já cancelada", a venda recarrega como CANCELADA e o formulário desmonta, levando junto o erro dele. Por isso o aviso sobe para a página (`onAlreadyCanceled`).
+- **Elemento `<search>`.** É o equivalente semântico de `role="search"` (o lint `prefer-tag-over-role` apontou). O leitor de tela anuncia a região como busca.
+
+### Conferido nos dois sentidos
+
+- **Mutation checks**, cada um derrubando pelo menos um teste: chave nova a cada envio, carrinho mudando sem trocar a chave, produto repetido sem somar, validação de saldo removida, aviso do 409 removido, foco não devolvido e ordem padrão da lista ignorada.
+- **Rede caindo depois de gravar:** o mock tem a opção `dropNextSaleResponse`, que grava a venda e devolve um erro de rede. O teste confere que o segundo clique manda a mesma chave, que só uma venda existe e que o estoque baixou uma vez.
+- **Contra a API real:** venda (201), retry com a mesma chave (200, mesma venda), mesma chave com outros itens (409), sem chave (400), estoque insuficiente (409 com `details` no topo da resposta, como o mock supõe), VENDEDOR sem `costPrice`/`unitCost`, lista com os parâmetros da tela, VENDEDOR cancelando (403), motivo em branco (400), cancelamento com estorno do saldo, segundo cancelamento (409) e VENDEDOR abrindo venda de outra pessoa (404).
+
+### Decisões e alternativas descartadas
+
+| Decisão | Por quê | Alternativa descartada |
+|---|---|---|
+| Chave reusada até o carrinho mudar | Retry seguro depois de queda de rede | Chave nova a cada clique (duplicaria a venda) |
+| Erro explícito sem `crypto.randomUUID` | Chave previsível quebraria a deduplicação | Fallback com `Math.random` |
+| Carrinho em `useState` | Linhas nascem de cliques, validação é uma função pura | `useFieldArray` do react-hook-form |
+| Prévia em centavos inteiros | Sem erro de ponto flutuante | Somar `Number(salePrice) * qtd` |
+| Cancelamento com formulário na página | Motivo é obrigatório | `window.confirm`, que não tem campo |
+| Sem filtro por vendedor | `GET /users` é só do ADMIN | Campo que o GERENTE veria vazio |
+
+### Perguntas de entrevista
+
+1. **O vendedor clica em "Registrar venda", a rede cai e ele clica de novo. A venda sai duplicada?**
+   Não. O primeiro clique gerou um UUID e mandou no header `Idempotency-Key`. O segundo clique, com o carrinho igual, manda a mesma chave. Se o servidor gravou na primeira vez, ele encontra a venda pela chave e devolve a mesma (200), sem baixar o estoque de novo. Se não gravou, grava agora. O índice único na coluna da chave resolve até o caso de as duas requisições chegarem juntas.
+
+2. **Por que o preço não vai no corpo da venda, se a tela já mostra o preço?**
+   Porque o preço da tela pode estar velho ou ter sido editado no navegador. O servidor lê o preço do banco no mesmo comando que baixa o estoque, e o DTO recusa `unitPrice` (400). O total da tela é só uma prévia, e por isso a tela avisa que o valor confirmado é o do servidor.
+
+3. **Por que o VENDEDOR recebe 404, e não 403, ao abrir a venda de outra pessoa?**
+   Um 403 confirmaria que aquele id existe, o que é um vazamento de informação (IDOR). Com 404, "não existe" e "não é sua" ficam iguais para quem está de fora. A lista também filtra pelo id que vem do token, nunca por um parâmetro que o cliente possa trocar.

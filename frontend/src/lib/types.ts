@@ -87,7 +87,41 @@ export interface StockAlert {
   shortage: number;
 }
 
+export type SaleStatus = 'CONCLUIDA' | 'CANCELADA';
+
+export const SALE_STATUS_LABELS: Record<SaleStatus, string> = {
+  CONCLUIDA: 'Concluída',
+  CANCELADA: 'Cancelada',
+};
+
+/** Preço e custo gravados na hora da venda. unitCost não vem para VENDEDOR. */
+export interface SaleItem {
+  product: { id: string; sku: string; name: string };
+  quantity: number;
+  unitPrice: string;
+  unitCost?: string;
+  subtotal: string;
+}
+
+export interface Sale {
+  id: string;
+  number: number;
+  seller: Ref;
+  status: SaleStatus;
+  total: string;
+  items: SaleItem[];
+  createdAt: string;
+  canceledAt: string | null;
+  canceledBy: Ref | null;
+  cancelReason: string | null;
+}
+
+/** Limites do CreateSaleDto (MAX_SALE_ITEMS e MAX_STOCK). */
+export const MAX_SALE_ITEMS = 50;
+export const MAX_QUANTITY = 1_000_000;
+
 // Espelham as listas permitidas dos DTOs de listagem do back-end.
+export const SALE_SORT_FIELDS = ['createdAt', 'number', 'total'] as const;
 export const PRODUCT_SORT_FIELDS = [
   'name',
   'sku',

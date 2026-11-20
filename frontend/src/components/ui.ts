@@ -6,6 +6,10 @@ export const inputClass =
 export const primaryButton =
   'inline-block rounded-md bg-indigo-700 px-4 py-2 font-medium text-white hover:bg-indigo-800 disabled:opacity-60';
 
+/** Ação destrutiva confirmada (ex.: "Confirmar cancelamento"). */
+export const dangerButton =
+  'inline-block rounded-md bg-red-700 px-4 py-2 font-medium text-white hover:bg-red-800 disabled:opacity-60';
+
 export const secondaryButton =
   'inline-block rounded-md border border-slate-300 px-4 py-2 hover:bg-slate-50 disabled:opacity-60';
 
