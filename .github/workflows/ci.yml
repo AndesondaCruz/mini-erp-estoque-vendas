@@ -143,25 +143,24 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      # Constrói a imagem e sobe banco + API exatamente como no ambiente local.
-      # --wait: só continua quando todos os healthchecks estiverem verdes.
+      # Constrói as imagens e sobe banco + API + front exatamente como no
+      # ambiente local. --wait: só continua quando todos os healthchecks
+      # estiverem verdes.
       - name: Subir o ambiente completo (docker compose)
-        run: docker compose up --build --detach --wait --wait-timeout 180
+        run: docker compose up --build --detach --wait --wait-timeout 240
 
-      - name: Smoke test da API
+      - name: Migrations, seed e API sem root
         run: |
           set -e
-          curl --fail --silent http://localhost:3000/api/v1/health | grep -q '"database":"up"'
-          curl --fail --silent --output /dev/null http://localhost:3000/api/docs
-          # Migrations aplicadas pelo entrypoint num banco vazio + seed + login de verdade.
+          # Migrations aplicadas pelo entrypoint num banco vazio.
           docker compose logs api | grep -q "migration"
           docker compose exec -T api node dist/seed.js
-          curl --fail --silent -X POST http://localhost:3000/api/v1/auth/login \
-            -H 'Content-Type: application/json' \
-            -d '{"email":"admin@mini-erp.local","password":"admin-local-123"}' \
-            | grep -q '"role":"ADMIN"'
           test "$(docker compose exec -T api whoami)" = "node"
-          echo "API, banco, Swagger, migrations, seed e login funcionando; container sem root."
+
+      # Tudo entra pela porta do Nginx (8080): front, API e Swagger. O mesmo
+      # script roda localmente (instruções no topo dele).
+      - name: Smoke test pelo Nginx
+        run: sh docker/smoke-test.sh
 
       - name: Logs dos containers (em caso de falha)
         if: failure()

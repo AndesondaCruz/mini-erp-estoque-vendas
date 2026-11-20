@@ -58,6 +58,16 @@ updates:
       - dependency-name: node
         update-types: [version-update:semver-major]
 
+  # Imagens do front: Node (só no build) e Nginx (imagem final).
+  - package-ecosystem: docker
+    directory: /frontend
+    schedule:
+      interval: weekly
+    ignore:
+      # Mesmo motivo da API: o Node sobe junto com .nvmrc e CI.
+      - dependency-name: node
+        update-types: [version-update:semver-major]
+
   - package-ecosystem: github-actions
     directory: /
     schedule:
