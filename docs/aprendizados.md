@@ -620,3 +620,40 @@ O teste "venda às 23h30 em Fortaleza conta no dia local" foi rodado com `REPORT
 
 3. **Um teste começou a falhar sem você ter mexido nele. Como você investigou?**
    Rodei o teste sozinho e ele passou, então o problema vinha de outro teste. O anterior fazia login e caía na página de relatórios, que agora faz requisições. Ele terminava antes das respostas, o `afterEach` limpava o token, as respostas voltavam com 401 e disparavam um refresh contado no teste seguinte. A correção foi cancelar as requisições quando a tela desmonta, repassando o `AbortSignal` do React Query ao `fetch`. Isso também melhora o app real.
+
+## Fase 9c-1: leitura da auditoria e acesso negado auditado
+
+### Conceitos usados
+
+- **Guard assíncrono.** `canActivate` pode devolver `Promise<boolean>`. O `RolesGuard` passou a ser `async` porque precisa esperar a gravação do acesso negado antes de lançar o 403. Os testes mudaram de `toThrow` para `rejects.toThrow`: com uma função assíncrona, o erro chega como promessa rejeitada, não como exceção lançada na hora.
+- **Fail closed.** Quando a parte acessória (a auditoria) falha, o resultado tem que ser o lado seguro (negar). O `try/catch` em volta da gravação só existe para isso: o erro vai para o log e o `ForbiddenException` é lançado do mesmo jeito.
+- **Auditoria com e sem transação.** Nos services, a auditoria entra na mesma transação da ação (as duas ou nenhuma). No acesso negado não existe ação, então a gravação é avulsa.
+- **Padrão da rota, não a URL.** No Express, depois que a rota é encontrada, `request.route.path` é o padrão (`/api/v1/users/:id`). Guardar o padrão evita levar para a auditoria a query string e o id pedido.
+- **Tipo derivado de valor.** `type AuditAction = (typeof AUDIT_ACTIONS)[number]`: o array existe em tempo de execução (o `@IsIn` precisa dele) e o tipo sai dele, com uma única fonte da verdade.
+- **Paginação estável.** Ordenar só por `createdAt` não é determinístico quando dois registros têm o mesmo milissegundo: o banco pode devolvê-los em ordem diferente a cada consulta, e um registro aparece em duas páginas ou em nenhuma. O `id` como segundo critério resolve.
+
+### Conferido nos dois sentidos
+
+- **Mutation checks** (5), cada um derrubando pelo menos um teste: guard que não grava, URL no lugar do padrão da rota, `to` inclusivo, `from` depois de `to` aceito e falha da auditoria propagando para fora do guard. Este último só é pego pelo teste unitário, como esperado: no e2e o banco nunca falha.
+- **Contra a API real:** VENDEDOR recebe 403 em `/audit-logs` e em `/users?search=x`, os dois registros aparecem no filtro `action=ACCESS_DENIED` com a rota e sem o `search`, `from` depois de `to` responde 400 e a rota está no Swagger.
+
+### Decisões e alternativas descartadas
+
+| Decisão | Por quê | Alternativa descartada |
+|---|---|---|
+| Auditar toda negação por papel | Rota aberta aos três papéis nunca nega; nada fica de fora por esquecimento | Decorator opt-in `@AuditDenied()` |
+| Não auditar rota sem `@Roles` | É bug de quem escreveu, não tentativa de acesso | Gravar todo 403 |
+| Esperar a gravação antes do 403 | O registro existe quando o cliente recebe a resposta | Gravar sem `await` (mais rápido, mas pode se perder) |
+| Período sem limite de dias | A paginação já limita a resposta | Limite de 366 dias como nos relatórios |
+| Usuário junto no registro | A tela mostra o nome sem segunda chamada | Devolver só o `userId` |
+
+### Perguntas de entrevista
+
+1. **Se o banco cair na hora de gravar o acesso negado, o que acontece?**
+   A pessoa continua recebendo 403. A gravação fica num `try/catch` que só registra o erro no log. Uma falha na auditoria nunca pode virar acesso liberado: é o princípio de "fail closed".
+
+2. **Por que a auditoria guarda `/api/v1/users/:id` e não a URL que a pessoa chamou?**
+   A URL pode trazer dados na query string, como um termo de busca, e a auditoria só deve guardar o necessário. O padrão da rota, junto com o método, o papel e os papéis exigidos, já diz o que foi tentado.
+
+3. **Como você evita que a mesma linha apareça em duas páginas da listagem?**
+   Com uma ordenação determinística: `createdAt` e depois `id`. Só com a data, registros do mesmo milissegundo podem vir em ordem diferente a cada consulta, e o `OFFSET` da página seguinte pode repetir ou pular algum. O teste e2e percorre todas as páginas com `pageSize=2` e confere que cada id aparece uma vez só.

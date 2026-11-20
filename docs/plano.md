@@ -364,10 +364,11 @@ Regra de trabalho: uma branch e um PR por feature, título em Conventional Commi
 - 8a (`feat/frontend-catalog`): telas de produtos, categorias e fornecedores; testes com Testing Library, MSW e axe-core.
 - 8b (`feat/frontend-stock`): extrato e lançamento de movimentações, histórico por produto, alertas na tela inicial.
 
-**Fase 9: front-end de vendas, relatórios, usuários e auditoria**, em três PRs:
+**Fase 9: front-end de vendas, relatórios, usuários e auditoria**, em três etapas (a 9c em dois PRs):
 - 9a (`feat/frontend-sales`): tela de venda (busca de produto, carrinho, `Idempotency-Key`, tratamento de 409), listagem de vendas, detalhe, cancelamento com confirmação e motivo (ADMIN e GERENTE).
 - 9b (`feat/frontend-reports`): relatórios de vendas por período, produtos mais vendidos e valor do estoque, com gráficos simples.
-- 9c (`feat/users-audit`): rota `GET /audit-logs` no back-end (ainda não existe; o módulo de auditoria só grava), tela de auditoria e tela de usuários (ADMIN). A tela de usuários faltava nesta lista, embora o menu e a API já existissem.
+- 9c-1 (`feat/audit-logs-api`): rota `GET /audit-logs` no back-end (até aqui o módulo de auditoria só gravava) e auditoria do acesso negado (403) no `RolesGuard`.
+- 9c-2 (`feat/frontend-users-audit`): tela de usuários e tela de auditoria (ADMIN), e tela "Trocar minha senha" para todos os papéis. A tela de usuários faltava nesta lista, embora o menu e a API já existissem.
 
 **Fase 10: entrega** (`chore/delivery`)
 - Compose completo (db, api, front via Nginx) com um único comando, seed de demonstração com usuário demo de cada papel, deploy (Vercel + Render + Neon, planos gratuitos), README completo, teste dos comandos do README em um clone limpo em `/tmp`, `docs/post-linkedin.md`.
@@ -485,3 +486,13 @@ Decisões da Fase 9b (19/11/2026):
 66. Na semana e no mês, o primeiro e o último período podem estar incompletos (o período começa na segunda ou no dia 1º, mas só conta os dias do filtro, como no back-end). A tela avisa.
 67. `api()` aceita o `AbortSignal` do React Query, e os relatórios o repassam: sair da tela antes da resposta cancela a requisição. Isso também corrigiu um vazamento entre testes (um 401 tardio de uma tela já desmontada disparava refresh no teste seguinte). Repassar o `signal` nas listas antigas fica para um PR próprio.
 68. O bundle foi a 560 kB (167 kB com gzip). Continua a decisão 43: divisão por rota na Fase 10.
+
+Decisões da Fase 9c-1 (20/11/2026):
+
+69. A Fase 9c vira dois PRs: o back-end (`GET /audit-logs` e o 403 auditado) e depois as telas. Cada PR fica pequeno o bastante para revisar, e a tela de auditoria nasce sobre uma rota já testada.
+70. Toda negação **por papel** no `RolesGuard` grava `ACCESS_DENIED`. Uma rota aberta aos três papéis nunca nega, então qualquer 403 por papel já é uma tentativa contra uma rota restrita; isso cumpre o "acesso negado em rotas sensíveis" da seção 4. O 403 de rota sem `@Roles` não é auditado: é erro de quem escreveu a rota e continua só no log. Descartado: um decorator opt-in (`@AuditDenied()`), que deixaria sem auditoria a rota em que alguém esquecesse de colocá-lo. O volume é contido pelo rate limiting global; política de retenção fica fora do MVP.
+71. A gravação do acesso negado é isolada (não há ação a proteger numa transação) e "fail closed": se falhar, o erro vai para o log e a resposta continua sendo 403. O guard espera a gravação antes de responder, para o registro existir quando o cliente recebe o 403.
+72. O `metadata` do acesso negado guarda método, padrão da rota (`/api/v1/users/:id`), papel e papéis exigidos. Nunca a URL: a query string pode trazer termos de busca, e o id pedido não acrescenta nada para quem investiga.
+73. `GET /audit-logs` (ADMIN): filtros por `userId`, `action`, `entity`, `entityId` e período em instantes ISO (`from` inclusivo, `to` exclusivo, a mesma convenção da lista de vendas). `from` igual ou depois de `to` responde 400. Sem limite de tamanho do período: a paginação já limita a resposta. Ordenação só por `createdAt` (decrescente por padrão), com o `id` desempatando para a paginação não repetir nem pular registros. Cada registro traz o usuário (id, nome e e-mail), para a tela não precisar de outra chamada.
+74. `AuditAction` passa a ser derivado de um array `AUDIT_ACTIONS` (`as const`): o validador do filtro e o tipo do TypeScript usam a mesma lista e não podem divergir. O mesmo vale para `AUDIT_ENTITIES`, derivado de `AUDITABLE_FIELDS`.
+75. "Trocar minha senha" (`PATCH /auth/me/password`) ganha tela para os três papéis na 9c-2: a rota existia desde a Fase 1 sem interface.

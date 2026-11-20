@@ -7,10 +7,19 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
+import { AuditService } from '../../audit/audit.service.js';
 import type { Role } from '../../generated/prisma/client.js';
 import type { AuthenticatedUser } from '../authenticated-user.js';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator.js';
 import { ROLES_KEY } from '../decorators/roles.decorator.js';
+
+// Só o que o guard lê da requisição do Express.
+interface GuardRequest {
+  user?: AuthenticatedUser;
+  method?: string;
+  ip?: string;
+  route?: { path?: string };
+}
 
 /**
  * Guard global de autorização. Roda DEPOIS do JwtAuthGuard, que é quem
@@ -23,9 +32,12 @@ import { ROLES_KEY } from '../decorators/roles.decorator.js';
 export class RolesGuard implements CanActivate {
   private readonly logger = new Logger(RolesGuard.name);
 
-  constructor(private readonly reflector: Reflector) {}
+  constructor(
+    private readonly reflector: Reflector,
+    private readonly audit: AuditService,
+  ) {}
 
-  canActivate(context: ExecutionContext): boolean {
+  async canActivate(context: ExecutionContext): Promise<boolean> {
     // Procura primeiro no método e depois na classe; o primeiro encontrado
     // vence. Por isso @Roles no método sobrescreve o @Roles da classe.
     const targets = [context.getHandler(), context.getClass()];
@@ -34,9 +46,8 @@ export class RolesGuard implements CanActivate {
       return true;
     }
 
-    const user = context
-      .switchToHttp()
-      .getRequest<{ user?: AuthenticatedUser }>().user;
+    const request = context.switchToHttp().getRequest<GuardRequest>();
+    const { user } = request;
     if (!user) {
       // Só acontece se a ordem dos guards for trocada por engano.
       throw new UnauthorizedException('Usuário não autenticado');
@@ -56,10 +67,45 @@ export class RolesGuard implements CanActivate {
     }
 
     if (!required.includes(user.role)) {
+      // Toda negação por papel é uma tentativa contra uma rota restrita (uma
+      // rota aberta aos três papéis nunca chega aqui), então vai para a
+      // auditoria. O 403 de rota mal configurada, acima, não vai: é erro de
+      // quem escreveu a rota, não tentativa de acesso.
+      await this.recordDenied(request, user, required);
       throw new ForbiddenException(
         'Seu perfil não tem permissão para esta ação',
       );
     }
     return true;
+  }
+
+  /**
+   * Grava o acesso negado sem nunca impedir o 403: se a auditoria falhar,
+   * o erro vai para o log e a resposta continua sendo negar (fail closed).
+   */
+  private async recordDenied(
+    request: GuardRequest,
+    user: AuthenticatedUser,
+    required: Role[],
+  ): Promise<void> {
+    try {
+      await this.audit.record({
+        action: 'ACCESS_DENIED',
+        userId: user.id,
+        metadata: {
+          method: request.method,
+          // O padrão da rota (/api/v1/users/:id), não a URL: a query string
+          // pode trazer termos de busca, que não pertencem à auditoria.
+          route: request.route?.path ?? null,
+          role: user.role,
+          requiredRoles: required,
+        },
+        ip: request.ip,
+      });
+    } catch (error) {
+      this.logger.error(
+        `Falha ao auditar acesso negado: ${(error as Error).message}`,
+      );
+    }
   }
 }
