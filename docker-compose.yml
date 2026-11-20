@@ -1,7 +1,13 @@
 # Ambiente local do Mini-ERP.
 #
 #   docker compose up -d db          -> só o banco (desenvolvimento: API roda com npm run start:dev)
-#   docker compose up --build --wait -> banco + API, como em produção
+#   docker compose up --build --wait -> banco + API + front (Nginx), como em produção
+#
+# Com tudo em containers, a única porta publicada é a do Nginx (8080): o front,
+# a API em /api/v1 e o Swagger em /api/docs entram por ela. A API não fica
+# exposta direto porque confia no X-Forwarded-For do Nginx (TRUST_PROXY=1):
+# quem falasse com ela sem passar pelo Nginx poderia forjar o IP e escapar
+# do rate limit.
 #
 # As credenciais abaixo são só para uso local. Em produção vêm de variáveis do provedor.
 
@@ -39,15 +45,16 @@ services:
       CORS_ORIGINS: http://localhost:5173
       REPORTS_TIMEZONE: America/Fortaleza
       LOG_LEVEL: info
-      TRUST_PROXY: 0
+      # Um proxy na frente: o Nginx do serviço web.
+      TRUST_PROXY: 1
       # Valores só para uso local. Em produção, o segredo vem do provedor
       # (Render) e é gerado com: node -e "console.log(require('node:crypto').randomBytes(48).toString('base64url'))"
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-segredo-local-do-docker-compose-nao-use-em-producao}
       SEED_ADMIN_NAME: Administrador
       SEED_ADMIN_EMAIL: admin@mini-erp.local
       SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-admin-local-123}
-    ports:
-      - '3000:3000'
+    # Sem "ports": a API só é acessível pela rede interna do Compose (pelo
+    # Nginx). Para chamar a API direto, use o modo de desenvolvimento.
     depends_on:
       # Só sobe a API quando o banco responder. Sem isso, a API tenta
       # conectar num banco que ainda está iniciando.
@@ -72,6 +79,26 @@ services:
       resources:
         limits:
           memory: 384m
+
+  web:
+    build: ./frontend
+    ports:
+      - '8080:8080'
+    depends_on:
+      # O Nginx resolve o nome "api" ao iniciar: a API precisa existir antes.
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '--spider', 'http://127.0.0.1:8080/']
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    restart: on-failure:5
+    deploy:
+      resources:
+        limits:
+          memory: 64m
 
 volumes:
   pgdata:

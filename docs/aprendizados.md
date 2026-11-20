@@ -742,3 +742,30 @@ O teste "venda às 23h30 em Fortaleza conta no dia local" foi rodado com `REPORT
 
 3. **Um usuário sem permissão baixa o código da página de administração?**
    Baixa, porque a verificação de papel do front acontece depois de a rota carregar. Isso não é um problema de segurança: o código do front é público de qualquer jeito, e os dados só vêm da API, que confere o papel em cada requisição.
+
+## Fase 10b: front no Compose com Nginx
+
+### Conceitos usados
+
+- **Proxy reverso.** O Nginx recebe tudo na porta 8080: entrega os arquivos do front e repassa `/api` para a API. Para o navegador há uma origem só, então o cookie `SameSite=Strict` é enviado e não é preciso CORS.
+- **`trust proxy` e `X-Forwarded-For`.** Atrás de um proxy, o IP que a API vê é o do proxy. O cabeçalho `X-Forwarded-For` carrega o IP real, mas qualquer cliente pode escrever nele. `TRUST_PROXY=1` diz ao Express: "confie no último endereço, que foi o proxy quem escreveu". Isso só é seguro se ninguém conseguir falar com a API sem passar pelo proxy, e por isso a porta 3000 deixou de ser publicada.
+- **SPA atrás de servidor estático.** O React Router decide a tela no navegador, mas um F5 em `/vendas/123` pede esse caminho ao servidor. O `try_files $uri /index.html` devolve o `index.html` para qualquer caminho que não seja arquivo.
+- **Cache com hash no nome.** Os arquivos de `/assets` mudam de nome quando mudam de conteúdo, então podem ficar em cache por um ano. O `index.html` não pode: é ele que aponta para os nomes novos depois de um deploy.
+- **`add_header` no Nginx não é herdado** quando a `location` declara os seus próprios. Os cabeçalhos de segurança ficam num arquivo incluído em cada `location`.
+- **CSP sem `unsafe-inline`.** A CSP bloqueia `<script>` inline e atributos `style` escritos no HTML, mas não estilos aplicados por JavaScript (`element.style`). Como o React aplica `style={{}}` assim, a política estrita funciona.
+- **Container sem root.** A imagem `nginx-unprivileged` roda como o usuário `nginx` e ouve na 8080, porque portas abaixo de 1024 exigiriam root.
+
+### Conferido nos dois sentidos
+
+- O smoke test passou de primeira; por isso, quatro mutações no `nginx.conf`, cada uma derrubando o script. Ao montar a primeira, ficou claro que o meu comentário estava impreciso: acrescentar ao `X-Forwarded-For` também seria seguro com `TRUST_PROXY=1`. O perigoso é repassar o valor do cliente sem alteração, e essa foi a mutação testada.
+
+### Perguntas de entrevista
+
+1. **Por que a porta da API não é publicada no Compose?**
+   A API confia no IP que o Nginx informa, para o rate limit valer por cliente. Se a porta 3000 estivesse aberta, alguém poderia chamar a API direto com um `X-Forwarded-For` inventado e ganhar tentativas de login infinitas. Uma entrada só, pelo proxy, fecha essa porta.
+
+2. **Como você testa que o rate limit não é contornado com IP forjado?**
+   O smoke test faz seis tentativas de login, cada uma com um `X-Forwarded-For` diferente, e exige um 429 antes da sexta. Se o forjado fosse aceito, cada tentativa contaria como um IP novo e o 429 nunca viria. Conferi o teste quebrando o Nginx de propósito para repassar o cabeçalho do cliente: o script falhou.
+
+3. **Por que `index.html` sem cache e `/assets` com cache de um ano?**
+   Os arquivos de `/assets` têm um hash do conteúdo no nome; um conteúdo novo gera um nome novo, então o antigo pode ficar em cache para sempre. O `index.html` tem sempre o mesmo nome e é ele que aponta para os arquivos atuais: se ficasse em cache, o navegador continuaria carregando a versão antiga depois de um deploy.

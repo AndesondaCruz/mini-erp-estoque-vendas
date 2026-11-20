@@ -155,14 +155,19 @@ Fase 8, parte A (telas de catálogo) concluída:
 
 Pré-requisitos: Docker com Compose, Node 22.12 ou superior e npm 11.
 
-### Tudo em containers (banco + API)
+### Tudo em containers (banco + API + front)
 
 ```bash
 docker compose up --build --wait
 ```
 
-- Health: http://localhost:3000/api/v1/health
-- Swagger: http://localhost:3000/api/docs
+Tudo entra pelo Nginx, na porta 8080:
+
+- Aplicação: http://localhost:8080
+- Health: http://localhost:8080/api/v1/health
+- Swagger: http://localhost:8080/api/docs
+
+A API não é publicada direto: ela confia no IP que o Nginx informa (`TRUST_PROXY=1`), e uma porta aberta permitiria forjar esse IP para escapar do rate limit.
 
 As migrations são aplicadas automaticamente. Para criar o primeiro ADMIN:
 
@@ -172,7 +177,11 @@ docker compose exec api node dist/seed.js
 
 Login local: `admin@mini-erp.local` / `admin-local-123` (credenciais só para o ambiente local).
 
+Smoke test do ambiente (o mesmo que roda no CI): `sh docker/smoke-test.sh`. Ele esgota o limite de tentativas de login do seu IP por um minuto.
+
 Para parar: `docker compose down` (adicione `--volumes` para apagar também os dados do banco).
+
+O cookie de refresh sai com `Secure` (a API roda com `NODE_ENV=production`). Chrome e Firefox aceitam esse cookie em `http://localhost`; em navegadores que não aceitam, o login funciona, mas a sessão não sobrevive a um F5.
 
 ### Desenvolvimento (API fora do container)
 
