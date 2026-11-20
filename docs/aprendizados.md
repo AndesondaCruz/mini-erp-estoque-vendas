@@ -721,3 +721,24 @@ O teste "venda às 23h30 em Fortaleza conta no dia local" foi rodado com `REPORT
 
 3. **Por que você não aceitou o PR do Dependabot que atualizava o TypeScript?**
    Porque o repositório usa uma versão só nos dois projetos, e o back-end ainda não pode ir para o 7: o `@nestjs/swagger` declara compatibilidade só até o 6. Atualizar só o front criaria duas versões para manter. Fechei o PR com o motivo e configurei o Dependabot para ignorar o major, com um comentário no arquivo apontando a decisão.
+
+## Fase 10a: divisão do bundle por rota
+
+### Conceitos usados
+
+- **Import dinâmico.** `import('./pages/X')` devolve uma promessa e vira um arquivo `.js` próprio no build. O navegador só baixa esse arquivo quando a rota é aberta.
+- **`lazy` do React Router.** Com o data router, a navegação espera o arquivo da próxima página chegar antes de trocar a tela. A tela atual continua visível, sem um "carregando" a cada clique. Na primeira carga não há tela anterior, então o router mostra o `hydrateFallbackElement`.
+- **Medir antes de otimizar.** O mapa do bundle (sourcemap agrupado por pasta) mostrou que as bibliotecas pesavam mais que as páginas. A previsão foi de ganho pequeno, e o ganho real foi grande, porque zod e react-hook-form só eram usados por telas com formulário. Medir antes e depois é o que permite dizer o resultado com números.
+- **Testes e carregamento assíncrono.** Um teste do login falhou porque procurava o botão "Entrar" na hora (`getBy`), e a página agora chega um instante depois. `findBy` espera o elemento aparecer. O teste tinha uma premissa escondida (a página renderiza no mesmo instante), e a mudança a revelou.
+- **Como provar que a divisão funcionou.** O tamanho total não basta: o empacotador redistribui o código compartilhado quando a estrutura muda. A prova é o arquivo da página existir no build. Com a página importada de forma estática, o arquivo some e o Vite avisa `INEFFECTIVE_DYNAMIC_IMPORT`.
+
+### Perguntas de entrevista
+
+1. **Por que dividir o bundle por rota num sistema interno?**
+   A primeira visita, que é a de quem avalia o projeto pelo link, baixa só o necessário para o login. O pacote principal caiu de 171 kB para 79 kB com gzip. Também ajuda no cache: um deploy que muda uma tela invalida só o arquivo dela.
+
+2. **Qual a diferença entre `React.lazy` e o `lazy` das rotas do React Router?**
+   O `React.lazy` suspende a renderização e mostra o fallback do `<Suspense>` mais próximo a cada navegação para uma página ainda não baixada. O `lazy` do router carrega o código durante a navegação e só troca de tela quando ele chega, mantendo a tela atual visível.
+
+3. **Um usuário sem permissão baixa o código da página de administração?**
+   Baixa, porque a verificação de papel do front acontece depois de a rota carregar. Isso não é um problema de segurança: o código do front é público de qualquer jeito, e os dados só vêm da API, que confere o papel em cada requisição.
