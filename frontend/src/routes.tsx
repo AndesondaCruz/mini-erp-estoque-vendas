@@ -9,6 +9,9 @@ import { LoginPage } from './pages/LoginPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 import { ProductFormPage } from './pages/products/ProductFormPage';
 import { ProductsPage } from './pages/products/ProductsPage';
+import { NewSalePage } from './pages/sales/NewSalePage';
+import { SaleDetailPage } from './pages/sales/SaleDetailPage';
+import { SalesPage } from './pages/sales/SalesPage';
 import { MovementFormPage } from './pages/stock/MovementFormPage';
 import { StockPage } from './pages/stock/StockPage';
 import { SupplierFormPage } from './pages/suppliers/SupplierFormPage';
@@ -33,6 +36,13 @@ const SECTION_PAGES: Record<string, RouteObject[]> = {
   '/fornecedores': [
     { index: true, element: <SuppliersPage /> },
     formRoutes(<SupplierFormPage />),
+  ],
+  // Os três papéis vendem. O VENDEDOR só vê as próprias vendas (filtro na
+  // API) e o botão de cancelar só aparece para ADMIN e GERENTE.
+  '/vendas': [
+    { index: true, element: <SalesPage /> },
+    { path: 'nova', element: <NewSalePage /> },
+    { path: ':id', element: <SaleDetailPage /> },
   ],
   // A seção inteira já é só de ADMIN e GERENTE (NAV_ITEMS).
   '/estoque': [

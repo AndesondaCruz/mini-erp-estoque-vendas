@@ -34,6 +34,21 @@ export const moneyField = z
     message: 'Use um valor como 12,50 (até 2 casas decimais)',
   });
 
+/**
+ * "5.50" -> 550. Para a PRÉVIA do total do carrinho: a conta é feita em
+ * centavos inteiros, e não com 5.5 * 3 em ponto flutuante (0.1 + 0.2 !==
+ * 0.3). O total que vale é o que a API calcula com o preço do banco.
+ */
+export function toCents(value: string): number {
+  const [whole, fraction = ''] = value.split('.');
+  return Number(whole) * 100 + Number(fraction.padEnd(2, '0').slice(0, 2));
+}
+
+/** 550 -> "R$ 5,50" */
+export function formatCents(cents: number): string {
+  return BRL.format(cents / 100);
+}
+
 /** "5.50" -> "5,50", para preencher o formulário de edição. */
 export function toMoneyInput(value: string): string {
   return value.replace('.', ',');

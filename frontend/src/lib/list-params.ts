@@ -27,6 +27,8 @@ export function activeFromStatus(status: string | null): boolean | undefined {
 export function useListParams<S extends string>(
   sortFields: readonly S[],
   defaultSort: S,
+  /** Vendas abrem da mais recente: 'desc'. Cadastros abrem em A-Z: 'asc'. */
+  defaultOrder: SortOrder = 'asc',
 ) {
   const [params, setParams] = useSearchParams();
 
@@ -34,7 +36,9 @@ export function useListParams<S extends string>(
   const page = Number.isInteger(rawPage) && rawPage > 0 ? rawPage : 1;
   const rawSort = params.get('sort');
   const sort = sortFields.find((field) => field === rawSort) ?? defaultSort;
-  const order: SortOrder = params.get('order') === 'desc' ? 'desc' : 'asc';
+  const rawOrder = params.get('order');
+  const order: SortOrder =
+    rawOrder === 'asc' || rawOrder === 'desc' ? rawOrder : defaultOrder;
   const search = params.get('search') ?? '';
 
   /**
@@ -53,12 +57,13 @@ export function useListParams<S extends string>(
     });
   }
 
-  /** Clicar na coluna já ordenada inverte a ordem; outra coluna começa em asc. */
+  /**
+   * Clicar na coluna já ordenada inverte a ordem; outra coluna começa na
+   * ordem padrão da lista.
+   */
   function toggleSort(field: S) {
-    update({
-      sort: field,
-      order: field === sort && order === 'asc' ? 'desc' : 'asc',
-    });
+    const flipped: SortOrder = order === 'asc' ? 'desc' : 'asc';
+    update({ sort: field, order: field === sort ? flipped : defaultOrder });
   }
 
   return {

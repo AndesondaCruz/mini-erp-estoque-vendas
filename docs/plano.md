@@ -364,8 +364,10 @@ Regra de trabalho: uma branch e um PR por feature, título em Conventional Commi
 - 8a (`feat/frontend-catalog`): telas de produtos, categorias e fornecedores; testes com Testing Library, MSW e axe-core.
 - 8b (`feat/frontend-stock`): extrato e lançamento de movimentações, histórico por produto, alertas na tela inicial.
 
-**Fase 9: front-end de vendas e relatórios** (`feat/frontend-sales-reports`)
-- Tela de venda (busca de produto, carrinho, `Idempotency-Key`, tratamento de 409), listagem de vendas, cancelamento com confirmação e motivo (ADMIN e GERENTE), relatórios com gráficos simples, tela de auditoria (ADMIN).
+**Fase 9: front-end de vendas, relatórios, usuários e auditoria**, em três PRs:
+- 9a (`feat/frontend-sales`): tela de venda (busca de produto, carrinho, `Idempotency-Key`, tratamento de 409), listagem de vendas, detalhe, cancelamento com confirmação e motivo (ADMIN e GERENTE).
+- 9b (`feat/frontend-reports`): relatórios de vendas por período, produtos mais vendidos e valor do estoque, com gráficos simples.
+- 9c (`feat/users-audit`): rota `GET /audit-logs` no back-end (ainda não existe; o módulo de auditoria só grava), tela de auditoria e tela de usuários (ADMIN). A tela de usuários faltava nesta lista, embora o menu e a API já existissem.
 
 **Fase 10: entrega** (`chore/delivery`)
 - Compose completo (db, api, front via Nginx) com um único comando, seed de demonstração com usuário demo de cada papel, deploy (Vercel + Render + Neon, planos gratuitos), README completo, teste dos comandos do README em um clone limpo em `/tmp`, `docs/post-linkedin.md`.
@@ -459,3 +461,15 @@ Decisões da Fase 8b (18/11/2026):
 Decisão de manutenção (19/11/2026):
 
 50. `overrides` de `effect` para `3.22.5` no `backend/package.json`, por causa do alerta GHSA-7589-6fvf-x4pw (ReDoS, severidade alta, até 3.22.0). O `effect` chega pela CLI do Prisma (`prisma` -> `@prisma/config`, que fixa `3.20.0`), e ainda não há Prisma estável com a correção. O `npm audit fix --force` foi descartado porque voltaria para o Prisma 6. Abaixar o `--audit-level` do CI também foi descartado, porque desligaria o controle para todas as dependências. **Remover o override** quando um Prisma estável trouxer `effect >= 3.22.1`: conferir com `npm ls effect` sem o override.
+
+Decisões da Fase 9a (19/11/2026):
+
+51. A `Idempotency-Key` é gerada no navegador com `crypto.randomUUID()` no primeiro envio e reusada nos reenvios do mesmo carrinho. Qualquer mudança no carrinho, uma venda concluída ou um 409 apagam a chave. Assim, "tentar de novo" depois de uma queda de rede não duplica a venda.
+52. Sem `crypto.randomUUID` (HTTP fora de `localhost`), a tela avisa e não envia. Um fallback com `Math.random` foi descartado: a chave precisa ser imprevisível e única entre todos os vendedores.
+53. O carrinho é estado local (`useState`), e não `react-hook-form` com `useFieldArray`: as linhas nascem de cliques na busca, não de digitação, e a validação por linha cabe numa função pura (`validate`).
+54. Produto repetido soma na mesma linha. A API recusa o mesmo produto em dois itens (`ArrayUnique`).
+55. O total do carrinho é uma prévia calculada em centavos inteiros (`toCents`), nunca em ponto flutuante. O total gravado é o do servidor, com o preço lido do banco.
+56. A busca da venda é um `<form>` dentro de `<search>`, irmão do formulário do carrinho, e mostra só produtos ativos (`active=true`). Diferente da busca do estoque (decisão 48), aqui não há formulário em volta, então o Enter funciona sem tratamento manual.
+57. Cancelar abre um formulário com motivo obrigatório na própria página. Não usa `window.confirm` (decisão 42), porque o confirm não tem campo de texto. O foco vai para o motivo ao abrir e volta para o botão ao desistir.
+58. A lista de vendas não tem filtro por vendedor: montar esse filtro exige `GET /users`, que é só do ADMIN, e o GERENTE ficaria com um campo vazio. Fica para quando existir uma rota de vendedores para o GERENTE.
+59. `useListParams` ganhou o parâmetro `defaultOrder`: vendas abrem da mais recente (`desc`), cadastros continuam em ordem alfabética (`asc`).
