@@ -1,6 +1,15 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
+import {
+  type Paginated,
+  paginated,
+  toSkipTake,
+} from '../common/pagination/pagination.js';
 import type { Prisma } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import type {
+  AuditLogDto,
+  ListAuditLogsQueryDto,
+} from './dto/audit-log.dto.js';
 import {
   AUDITABLE_FIELDS,
   type AuditEntity,
@@ -32,6 +41,55 @@ export class AuditService {
         ip: entry.ip?.slice(0, 64) ?? null,
       },
     });
+  }
+
+  /** Lista a auditoria com filtros, do mais recente para o mais antigo. */
+  async list(query: ListAuditLogsQueryDto): Promise<Paginated<AuditLogDto>> {
+    const from = query.from ? new Date(query.from) : undefined;
+    const to = query.to ? new Date(query.to) : undefined;
+    if (from && to && from >= to) {
+      throw new BadRequestException('from deve ser anterior a to');
+    }
+
+    const where: Prisma.AuditLogWhereInput = {
+      ...(query.userId && { userId: query.userId }),
+      ...(query.action && { action: query.action }),
+      ...(query.entity && { entity: query.entity }),
+      ...(query.entityId && { entityId: query.entityId }),
+      ...((from || to) && {
+        createdAt: { ...(from && { gte: from }), ...(to && { lt: to }) },
+      }),
+    };
+
+    const [total, logs] = await this.prisma.$transaction([
+      this.prisma.auditLog.count({ where }),
+      this.prisma.auditLog.findMany({
+        where,
+        include: { user: { select: { id: true, name: true, email: true } } },
+        // `sort` já foi validado contra a lista de campos permitidos.
+        // O id desempata registros do mesmo milissegundo: sem ele, um registro
+        // poderia aparecer em duas páginas (ou em nenhuma).
+        orderBy: [{ [query.sort]: query.order }, { id: query.order }],
+        ...toSkipTake(query),
+      }),
+    ]);
+
+    return paginated(
+      logs.map((log) => ({
+        id: log.id,
+        action: log.action,
+        user: log.user,
+        entity: log.entity,
+        entityId: log.entityId,
+        before: log.before as Record<string, unknown> | null,
+        after: log.after as Record<string, unknown> | null,
+        metadata: log.metadata as Record<string, unknown> | null,
+        ip: log.ip,
+        createdAt: log.createdAt,
+      })),
+      total,
+      query,
+    );
   }
 
   /** Mantém só os campos permitidos para a entidade. */
