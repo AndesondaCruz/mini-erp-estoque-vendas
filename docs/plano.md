@@ -455,3 +455,7 @@ Decisões da Fase 8b (18/11/2026):
 47. Um 409 de estoque insuficiente mostra o `details.available` e busca o saldo de novo: alguém vendeu enquanto a tela estava aberta.
 48. A busca de produto do formulário usa botões de rádio, e não um combobox ARIA próprio: o rádio já é navegável por setas e anunciado pelo leitor de tela. Ela não é um `<form>` (formulário dentro de formulário é HTML inválido), então o Enter é tratado à mão.
 49. O filtro "até" da tela é inclusivo, e o `to` da API é exclusivo: o front manda o início do dia seguinte, no fuso do navegador.
+
+Decisão de manutenção (19/11/2026):
+
+50. `overrides` de `effect` para `3.22.5` no `backend/package.json`, por causa do alerta GHSA-7589-6fvf-x4pw (ReDoS, severidade alta, até 3.22.0). O `effect` chega pela CLI do Prisma (`prisma` -> `@prisma/config`, que fixa `3.20.0`), e ainda não há Prisma estável com a correção. O `npm audit fix --force` foi descartado porque voltaria para o Prisma 6. Abaixar o `--audit-level` do CI também foi descartado, porque desligaria o controle para todas as dependências. **Remover o override** quando um Prisma estável trouxer `effect >= 3.22.1`: conferir com `npm ls effect` sem o override.
