@@ -22,8 +22,9 @@ export function SaleProductSearch({ inCart, onAdd }: Props) {
 
   const results = useQuery({
     queryKey: ['products', 'sale-search', search],
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       api<Paginated<Product>>('/products', {
+        signal,
         // Só ativos: produto inativo não pode ser vendido (a API dá 409).
         query: { search, active: true, pageSize: 10, sort: 'name' },
       }),

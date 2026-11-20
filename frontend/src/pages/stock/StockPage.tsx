@@ -39,7 +39,7 @@ export function StockPage() {
 
   const product = useQuery({
     queryKey: ['products', 'detail', productId],
-    queryFn: () => api<Product>(`/products/${productId}`),
+    queryFn: ({ signal }) => api<Product>(`/products/${productId}`, { signal }),
     enabled: productId !== null,
   });
 
@@ -53,10 +53,10 @@ export function StockPage() {
   const query = useQuery({
     queryKey: ['stock-movements', productId, params],
     // Com produto, o extrato dele (404 se não existir); sem, o geral.
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       api<Paginated<StockMovement>>(
         productId ? `/products/${productId}/movements` : '/stock/movements',
-        { query: params },
+        { query: params, signal },
       ),
     placeholderData: keepPreviousData,
   });

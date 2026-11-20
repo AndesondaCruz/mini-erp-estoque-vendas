@@ -48,8 +48,9 @@ export function CategoriesPage() {
 
   const query = useQuery({
     queryKey: ['categories', list.page, list.search, list.sort, list.order],
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       api<Paginated<Category>>('/categories', {
+        signal,
         query: {
           page: list.page,
           search: list.search,

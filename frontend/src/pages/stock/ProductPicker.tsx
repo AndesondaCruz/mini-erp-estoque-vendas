@@ -24,8 +24,11 @@ export function ProductPicker({ selectedId, onSelect, error }: Props) {
 
   const results = useQuery({
     queryKey: ['products', 'picker', search],
-    queryFn: () =>
+    // Nova busca antes da anterior responder: a chave muda, a query antiga
+    // fica sem observador e o React Query aborta a requisição dela.
+    queryFn: ({ signal }) =>
       api<Paginated<Product>>('/products', {
+        signal,
         query: { search, pageSize: 10, sort: 'name' },
       }),
     enabled: search !== null,

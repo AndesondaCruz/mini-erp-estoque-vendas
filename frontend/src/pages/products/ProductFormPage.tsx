@@ -54,7 +54,7 @@ export function ProductFormPage() {
   const { id } = useParams();
   const product = useQuery({
     queryKey: ['products', 'detail', id],
-    queryFn: () => api<Product>(`/products/${id}`),
+    queryFn: ({ signal }) => api<Product>(`/products/${id}`, { signal }),
     enabled: id !== undefined,
   });
 

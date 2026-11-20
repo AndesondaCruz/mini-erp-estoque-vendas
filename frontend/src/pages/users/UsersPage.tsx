@@ -43,7 +43,8 @@ export function UsersPage() {
   };
   const query = useQuery({
     queryKey: ['users', 'list', params],
-    queryFn: () => api<Paginated<User>>('/users', { query: params }),
+    queryFn: ({ signal }) =>
+      api<Paginated<User>>('/users', { query: params, signal }),
     placeholderData: keepPreviousData,
   });
 

@@ -9,7 +9,7 @@ import { useAuth } from './auth-context';
  * permissão vê a página 403. É só experiência do usuário: quem protege os
  * dados de verdade é o RolesGuard do back-end.
  */
-export function RequireAuth({ roles }: { roles?: Role[] }) {
+export function RequireAuth({ roles }: { roles?: readonly Role[] }) {
   const { status, user, notice } = useAuth();
   const location = useLocation();
 

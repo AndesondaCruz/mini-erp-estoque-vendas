@@ -1,11 +1,10 @@
 import type { RouteObject } from 'react-router';
 import { RequireAuth } from './auth/RequireAuth';
 import { Layout } from './components/Layout';
-import { MANAGERS, NAV_ITEMS } from './lib/navigation';
+import { MANAGERS, NAV_ITEMS, type SectionPath } from './lib/navigation';
 import { ChangePasswordPage } from './pages/account/ChangePasswordPage';
 import { AuditPage } from './pages/audit/AuditPage';
 import { CategoriesPage } from './pages/categories/CategoriesPage';
-import { ComingSoonPage } from './pages/ComingSoonPage';
 import { HomePage } from './pages/HomePage';
 import { LoginPage } from './pages/LoginPage';
 import { NotFoundPage } from './pages/NotFoundPage';
@@ -31,8 +30,9 @@ const formRoutes = (form: React.ReactElement): RouteObject => ({
   ],
 });
 
-// Páginas de cada seção do menu. Seção sem entrada aqui mostra "Em breve".
-const SECTION_PAGES: Record<string, RouteObject[]> = {
+// Páginas de cada seção do menu. O Record exige uma entrada por SectionPath:
+// um item novo no menu sem página aqui não compila.
+const SECTION_PAGES: Record<SectionPath, RouteObject[]> = {
   '/produtos': [
     { index: true, element: <ProductsPage /> },
     formRoutes(<ProductFormPage />),
@@ -66,14 +66,17 @@ const SECTION_PAGES: Record<string, RouteObject[]> = {
 };
 
 // Cada seção do menu vira uma rota protegida pelos papéis da própria seção.
-const sections: RouteObject[] = NAV_ITEMS.filter((item) => item.to !== '/').map(
-  (item) => ({
-    path: item.to,
-    element: <RequireAuth roles={item.roles} />,
-    children: SECTION_PAGES[item.to] ?? [
-      { index: true, element: <ComingSoonPage title={item.label} /> },
-    ],
-  }),
+// No ramo do else, o TypeScript já sabe que item.to é um SectionPath.
+const sections: RouteObject[] = NAV_ITEMS.flatMap((item) =>
+  item.to === '/'
+    ? []
+    : [
+        {
+          path: item.to,
+          element: <RequireAuth roles={item.roles} />,
+          children: SECTION_PAGES[item.to],
+        },
+      ],
 );
 
 export const routes: RouteObject[] = [

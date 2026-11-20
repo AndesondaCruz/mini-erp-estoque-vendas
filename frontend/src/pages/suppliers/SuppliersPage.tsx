@@ -40,8 +40,9 @@ export function SuppliersPage() {
         status,
       },
     ],
-    queryFn: () =>
+    queryFn: ({ signal }) =>
       api<Paginated<Supplier>>('/suppliers', {
+        signal,
         query: {
           page: list.page,
           search: list.search,
