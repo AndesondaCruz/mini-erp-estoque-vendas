@@ -13,7 +13,7 @@ RUN npm run build
 
 # 2) Imagem final: Nginx oficial que roda sem root, ouvindo na porta 8080
 #    (porta abaixo de 1024 exigiria root).
-FROM nginxinc/nginx-unprivileged:1.29-alpine AS runtime
+FROM nginxinc/nginx-unprivileged:1.31-alpine AS runtime
 COPY nginx/default.conf /etc/nginx/conf.d/default.conf
 COPY nginx/security-headers.conf /etc/nginx/snippets/security-headers.conf
 COPY --from=build /app/dist /usr/share/nginx/html
