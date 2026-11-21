@@ -1,0 +1,62 @@
+# Restaura os dados da demonstração pública (banco no Neon) uma vez por dia,
+# e sob demanda pela aba Actions. Visitantes podem criar, editar e cancelar
+# à vontade: no dia seguinte tudo volta ao estado do seed, com as datas
+# relativas a "agora" (os relatórios dos últimos 30 dias nunca ficam vazios).
+#
+# O cron do Render é pago; o do GitHub Actions é gratuito em repositório
+# público. Atenção: o GitHub desativa workflows agendados depois de 60 dias
+# sem atividade no repositório.
+name: Reset da demo
+
+on:
+  schedule:
+    # 09:00 UTC = 06:00 em Fortaleza, antes do horário comercial.
+    - cron: '0 9 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Dois resets ao mesmo tempo disputariam o mesmo banco.
+concurrency:
+  group: demo-reset
+  cancel-in-progress: false
+
+jobs:
+  reset:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      DATABASE_URL: ${{ secrets.DEMO_DATABASE_URL }}
+      DEMO_PASSWORD: ${{ secrets.DEMO_PASSWORD }}
+      # O seed só apaga um banco com NODE_ENV=production se DEMO_MODE=true.
+      NODE_ENV: production
+      DEMO_MODE: 'true'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Dependências
+        run: npm ci
+
+      # A API aplica as migrations ao subir; aqui também, para o reset não
+      # depender de a API ter acordado depois do último deploy.
+      - name: Migrations
+        run: npx prisma migrate deploy
+
+      - name: Build
+        run: npm run build
+
+      - name: Recriar os dados da demo
+        run: node dist/seed-demo.js --reset
