@@ -71,6 +71,11 @@ O navegador fala com uma origem só: a Vercel repassa `/api` para o Render, como
 
 Pré-requisitos: Docker com Compose, Node 22 (veja `.nvmrc`) e npm.
 
+```bash
+git clone https://github.com/AndesondaCruz/mini-erp-estoque-vendas.git
+cd mini-erp-estoque-vendas
+```
+
 ### Tudo em containers
 
 ```bash
