@@ -47,6 +47,11 @@ export const envSchema = z.object({
   // Limite mais rígido para rotas sensíveis (login): contra força bruta.
   STRICT_THROTTLE_TTL_MS: z.coerce.number().int().positive().default(60_000),
   STRICT_THROTTLE_LIMIT: z.coerce.number().int().positive().default(5),
+  // Bloqueio por conta: depois de LOGIN_MAX_FAILURES falhas para o mesmo
+  // e-mail dentro de LOGIN_FAILURE_WINDOW_MS, o login responde 429. Não
+  // depende do IP, que atrás de proxies pode ser o do proxy (decisão 108).
+  LOGIN_MAX_FAILURES: z.coerce.number().int().positive().default(5),
+  LOGIN_FAILURE_WINDOW_MS: z.coerce.number().int().positive().default(900_000),
   // Quantos proxies confiáveis existem na frente da API (Render, Vercel).
   // Com 0, req.ip é o IP da conexão; atrás de proxy, seria o IP do proxy.
   TRUST_PROXY: z.coerce.number().int().min(0).default(0),

@@ -102,7 +102,11 @@ describe('Autenticação (e2e)', () => {
         'LOGIN_FAILED',
       ]);
       expect(logs[0].userId).toBe(user.id);
-      expect(logs[1].metadata).toEqual({ reason: 'WRONG_PASSWORD' });
+      // O e-mail entra em toda falha: é por ele que o bloqueio por conta conta.
+      expect(logs[1].metadata).toEqual({
+        email: 'ana@loja.com',
+        reason: 'WRONG_PASSWORD',
+      });
       expect(logs[2]).toMatchObject({
         userId: null,
         metadata: { email: 'ninguem@loja.com', reason: 'UNKNOWN_EMAIL' },

@@ -798,3 +798,30 @@ O teste "venda às 23h30 em Fortaleza conta no dia local" foi rodado com `REPORT
 
 3. **Como impedir que um visitante tranque a conta demo para os próximos?**
    Com `DEMO_MODE=true`, a API recusa com 403 trocar a senha, o e-mail ou o papel e desativar as contas marcadas como demo. O e-mail entrou na lista porque o login é feito por ele: trocá-lo tem o mesmo efeito de trocar a senha. O resto continua livre, e o seed com `--reset` restaura os dados.
+
+## Fase 10e: deploy e bloqueio de login por conta
+
+### Conceitos usados
+
+- **`trust proxy` medido, não estimado.** Cada proxy entre o visitante e a API acrescenta um endereço ao `X-Forwarded-For`. O `TRUST_PROXY=N` manda o Express ignorar os N últimos e usar o próximo como IP do cliente. Medi o valor certo comparando o IP gravado na auditoria com o meu IP real, pelos dois caminhos de entrada (Render direto e Vercel), com e sem um cabeçalho forjado. No Render, que tem a Cloudflare e dois proxies próprios, o valor é 3.
+- **Um valor alto demais é uma falha de segurança.** Pela Vercel, o valor que daria o IP real é 4. Mas o endereço do Render é público, e com 4 uma requisição direta poderia mandar um `X-Forwarded-For` inventado e escapar do rate limit trocando o IP a cada tentativa.
+- **Defesa em duas camadas.** O limite por IP depende de uma informação que o atacante influencia. O bloqueio por conta depende do alvo, que ele não controla. Sistemas reais usam os dois.
+- **Contar só as falhas.** As contas demo são compartilhadas: um limite que contasse todos os logins bloquearia recrutadores entrando ao mesmo tempo.
+- **Enumeração de usuários.** Se só contas existentes fossem bloqueadas, o 429 diria quais e-mails estão cadastrados. Por isso o e-mail inexistente recebe o mesmo tratamento, como já acontecia com a mensagem "Credenciais inválidas".
+- **Segredos fora da tela.** A URL do banco e o segredo do JWT foram de um programa para outro (arquivo com permissão 600, `gh secret set` pela entrada padrão, corpo da requisição gerado num script) sem aparecer no terminal nem na conversa.
+- **`NODE_ENV=production` no lugar errado.** No nível do job do workflow, ele fez o `npm ci` pular as devDependencies e o build falhou. Variável de ambiente tem escopo: ela vai só no passo que precisa dela.
+
+### Conferido nos dois sentidos
+
+- O teste "tentativas bloqueadas não estendem o bloqueio" passava mesmo com a regra quebrada, porque as tentativas bloqueadas expiravam junto com as falhas. Reescrevi a linha do tempo (falhas em t = 0, bloqueadas em 60% da janela, login logo depois do fim da janela original). Com o filtro de `TOO_MANY_ATTEMPTS` removido, o teste agora falha.
+
+### Perguntas de entrevista
+
+1. **Por que só o rate limit por IP não basta?**
+   Porque o IP é a informação mais fácil de variar: atrás de proxies a API pode ver o IP do proxy, e um atacante pode distribuir tentativas entre muitos IPs. O bloqueio por conta limita as tentativas contra uma conta específica, venha de onde vier.
+
+2. **O bloqueio por conta não permite travar a conta de alguém?**
+   Permite, por 15 minutos, para quem souber o e-mail. É o preço conhecido desse tipo de defesa. Mantive a janela curta e deixei as contas demo fora, porque a senha delas é pública: lá o bloqueio só serviria para derrubar a demo.
+
+3. **Como você chegou ao valor do `trust proxy` em produção?**
+   Medindo. Fiz login por cada caminho e comparei o IP que a auditoria gravou com o meu IP real; depois repeti com um `X-Forwarded-For` forjado. O valor certo é o que dá o IP real sem nunca aceitar o forjado. Pela Vercel não existe valor que faça as duas coisas, e por isso entrou o bloqueio por conta.

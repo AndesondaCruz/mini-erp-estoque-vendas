@@ -1,6 +1,8 @@
 import {
   BadRequestException,
   ConflictException,
+  HttpException,
+  HttpStatus,
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -33,6 +35,9 @@ export interface AuthResult {
 // a resposta não revela qual dos três aconteceu.
 const INVALID_CREDENTIALS = 'Credenciais inválidas';
 
+export const TOO_MANY_ATTEMPTS =
+  'Muitas tentativas para esta conta. Tente novamente em alguns minutos.';
+
 @Injectable()
 export class AuthService {
   constructor(
@@ -50,13 +55,23 @@ export class AuthService {
     password: string,
     ip?: string,
   ): Promise<AuthResult> {
-    const user = await this.users.findByEmail(email);
+    const normalizedEmail = email.trim().toLowerCase();
+    const user = await this.users.findByEmail(normalizedEmail);
+
+    // Bloqueio por conta, antes de conferir a senha: durante o bloqueio,
+    // nem a senha certa entra. Vale igual para e-mail inexistente, senão o
+    // 429 revelaria quais e-mails estão cadastrados. Contas demo ficam de
+    // fora: a senha delas é pública, e o bloqueio só serviria para alguém
+    // tirar a demo do ar errando a senha de propósito.
+    if (!user?.isDemo) {
+      await this.assertNotLockedOut(normalizedEmail, user?.id, ip);
+    }
 
     if (!user) {
       await this.passwords.verifyAgainstDummy(password);
       await this.audit.record({
         action: 'LOGIN_FAILED',
-        metadata: { email, reason: 'UNKNOWN_EMAIL' },
+        metadata: { email: normalizedEmail, reason: 'UNKNOWN_EMAIL' },
         ip,
       });
       throw new UnauthorizedException(INVALID_CREDENTIALS);
@@ -69,7 +84,11 @@ export class AuthService {
       await this.audit.record({
         action: 'LOGIN_FAILED',
         userId: user.id,
-        metadata: { reason: passwordOk ? 'INACTIVE_USER' : 'WRONG_PASSWORD' },
+        metadata: {
+          // O e-mail entra sempre: é por ele que as falhas são contadas.
+          email: normalizedEmail,
+          reason: passwordOk ? 'INACTIVE_USER' : 'WRONG_PASSWORD',
+        },
         ip,
       });
       throw new UnauthorizedException(INVALID_CREDENTIALS);
@@ -197,6 +216,46 @@ export class AuthService {
         tx,
       );
     });
+  }
+
+  /**
+   * Conta as falhas de login do e-mail na janela configurada, a partir da
+   * auditoria (que já registra cada falha). No banco, e não em memória: vale
+   * depois de um reinício e com mais de uma instância da API. A janela curta
+   * usa o índice de created_at, sem varrer a tabela.
+   *
+   * A tentativa bloqueada também vai para a auditoria (um ataque fica
+   * visível), mas não entra na contagem: senão cada tentativa bloqueada
+   * empurraria o fim do bloqueio para frente.
+   */
+  private async assertNotLockedOut(
+    email: string,
+    userId: string | undefined,
+    ip: string | undefined,
+  ): Promise<void> {
+    const max = this.config.get('LOGIN_MAX_FAILURES', { infer: true });
+    const windowMs = this.config.get('LOGIN_FAILURE_WINDOW_MS', {
+      infer: true,
+    });
+    const since = new Date(Date.now() - windowMs);
+
+    const [{ failures }] = await this.prisma.$queryRaw<{ failures: number }[]>`
+      SELECT count(*)::int AS failures
+      FROM audit_logs
+      WHERE action = 'LOGIN_FAILED'
+        AND metadata->>'email' = ${email}
+        AND COALESCE(metadata->>'reason', '') <> 'TOO_MANY_ATTEMPTS'
+        AND created_at > ${since}`;
+
+    if (failures >= max) {
+      await this.audit.record({
+        action: 'LOGIN_FAILED',
+        userId,
+        metadata: { email, reason: 'TOO_MANY_ATTEMPTS' },
+        ip,
+      });
+      throw new HttpException(TOO_MANY_ATTEMPTS, HttpStatus.TOO_MANY_REQUESTS);
+    }
   }
 
   private async buildResult(
