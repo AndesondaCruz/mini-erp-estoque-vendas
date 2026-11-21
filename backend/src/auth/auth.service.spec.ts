@@ -2,6 +2,7 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  HttpException,
   UnauthorizedException,
 } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
@@ -12,7 +13,7 @@ import { DEMO_ACCOUNT_LOCKED_MESSAGE } from '../demo/demo-protection.js';
 import type { User } from '../generated/prisma/client.js';
 import type { PrismaService } from '../prisma/prisma.service.js';
 import type { UsersService } from '../users/users.service.js';
-import { AuthService } from './auth.service.js';
+import { AuthService, TOO_MANY_ATTEMPTS } from './auth.service.js';
 import type { PasswordService } from './password.service.js';
 import type { RefreshTokenService } from './refresh-token.service.js';
 
@@ -33,6 +34,8 @@ function setup({ demoMode = false } = {}) {
   const tx = { user: { update: vi.fn() } };
   const prisma = {
     $transaction: vi.fn((fn: (t: typeof tx) => unknown) => fn(tx)),
+    // Contagem de falhas de login do e-mail (bloqueio por conta).
+    $queryRaw: vi.fn().mockResolvedValue([{ failures: 0 }]),
   };
   const users = { findByEmail: vi.fn(), findById: vi.fn() };
   const passwords = {
@@ -54,6 +57,8 @@ function setup({ demoMode = false } = {}) {
   const configValues: Partial<Env> = {
     JWT_ACCESS_TTL_SECONDS: 900,
     DEMO_MODE: demoMode,
+    LOGIN_MAX_FAILURES: 5,
+    LOGIN_FAILURE_WINDOW_MS: 900_000,
   };
   const config = {
     get: vi.fn((key: keyof Env) => configValues[key]),
@@ -68,7 +73,7 @@ function setup({ demoMode = false } = {}) {
     audit as unknown as AuditService,
     config as unknown as ConfigService<Env, true>,
   );
-  return { service, tx, users, passwords, refreshTokens, jwt, audit };
+  return { service, tx, prisma, users, passwords, refreshTokens, jwt, audit };
 }
 
 describe('AuthService', () => {
@@ -110,7 +115,9 @@ describe('AuthService', () => {
       );
       expect(passwords.verify).toHaveBeenCalled();
       expect(audit.record).toHaveBeenCalledWith(
-        expect.objectContaining({ metadata: { reason: 'INACTIVE_USER' } }),
+        expect.objectContaining({
+          metadata: { email: 'ana@loja.com', reason: 'INACTIVE_USER' },
+        }),
       );
     });
 
@@ -201,6 +208,83 @@ describe('AuthService', () => {
         UnauthorizedException,
       );
       expect(refreshTokens.revokeAllForUser).toHaveBeenCalledWith('u1');
+    });
+  });
+
+  describe('login: bloqueio por conta', () => {
+    it('5 falhas na janela: 429 antes de conferir a senha, e audita o bloqueio', async () => {
+      const { service, prisma, users, passwords, audit } = setup();
+      users.findByEmail.mockResolvedValue(user);
+      prisma.$queryRaw.mockResolvedValue([{ failures: 5 }]);
+
+      await expect(
+        service.login(' Ana@Loja.com ', 'senha-certa', '10.0.0.1'),
+      ).rejects.toThrow(new HttpException(TOO_MANY_ATTEMPTS, 429));
+      // Nem a senha certa é conferida durante o bloqueio.
+      expect(passwords.verify).not.toHaveBeenCalled();
+      expect(audit.record).toHaveBeenCalledWith({
+        action: 'LOGIN_FAILED',
+        userId: 'u1',
+        metadata: { email: 'ana@loja.com', reason: 'TOO_MANY_ATTEMPTS' },
+        ip: '10.0.0.1',
+      });
+    });
+
+    it('4 falhas ainda deixam tentar', async () => {
+      const { service, prisma, users, passwords } = setup();
+      users.findByEmail.mockResolvedValue(user);
+      prisma.$queryRaw.mockResolvedValue([{ failures: 4 }]);
+      passwords.verify.mockResolvedValue(false);
+
+      await expect(service.login('ana@loja.com', 'errada')).rejects.toThrow(
+        new UnauthorizedException('Credenciais inválidas'),
+      );
+    });
+
+    it('e-mail inexistente é bloqueado igual (o 429 não revela quem existe)', async () => {
+      const { service, prisma, users, passwords } = setup();
+      users.findByEmail.mockResolvedValue(null);
+      prisma.$queryRaw.mockResolvedValue([{ failures: 5 }]);
+
+      await expect(service.login('x@loja.com', 'chute')).rejects.toThrow(
+        new HttpException(TOO_MANY_ATTEMPTS, 429),
+      );
+      expect(passwords.verifyAgainstDummy).not.toHaveBeenCalled();
+    });
+
+    it('conta demo não é bloqueada (a senha é pública)', async () => {
+      const { service, prisma, users, passwords } = setup();
+      users.findByEmail.mockResolvedValue({ ...user, isDemo: true });
+      prisma.$queryRaw.mockResolvedValue([{ failures: 50 }]);
+      passwords.verify.mockResolvedValue(true);
+
+      await expect(
+        service.login('ana@loja.com', 'senha'),
+      ).resolves.toMatchObject({ accessToken: 'access-token' });
+      expect(prisma.$queryRaw).not.toHaveBeenCalled();
+    });
+
+    it('a contagem ignora as tentativas já bloqueadas e usa a janela configurada', async () => {
+      const { service, prisma, users, passwords } = setup();
+      users.findByEmail.mockResolvedValue(user);
+      passwords.verify.mockResolvedValue(false);
+      const before = Date.now();
+
+      await service.login('ana@loja.com', 'errada').catch(() => undefined);
+
+      const [strings, email, since] = prisma.$queryRaw.mock.calls[0] as [
+        TemplateStringsArray,
+        string,
+        Date,
+      ];
+      const sql = strings.join('?');
+      expect(sql).toContain("action = 'LOGIN_FAILED'");
+      expect(sql).toContain("<> 'TOO_MANY_ATTEMPTS'");
+      expect(email).toBe('ana@loja.com');
+      // A janela começa 15 min antes do momento da chamada.
+      const after = Date.now();
+      expect(since.getTime()).toBeGreaterThanOrEqual(before - 900_000);
+      expect(since.getTime()).toBeLessThanOrEqual(after - 900_000);
     });
   });
 
