@@ -32,8 +32,6 @@ jobs:
     env:
       DATABASE_URL: ${{ secrets.DEMO_DATABASE_URL }}
       DEMO_PASSWORD: ${{ secrets.DEMO_PASSWORD }}
-      # O seed só apaga um banco com NODE_ENV=production se DEMO_MODE=true.
-      NODE_ENV: production
       DEMO_MODE: 'true'
 
     steps:
@@ -58,5 +56,10 @@ jobs:
       - name: Build
         run: npm run build
 
+      # NODE_ENV=production só aqui: no job inteiro, o "npm ci" pularia as
+      # devDependencies (inclusive o CLI do Nest usado no build). O seed só
+      # apaga um banco com NODE_ENV=production se DEMO_MODE=true.
       - name: Recriar os dados da demo
         run: node dist/seed-demo.js --reset
+        env:
+          NODE_ENV: production
