@@ -4,9 +4,12 @@ import {
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
+import type { ConfigService } from '@nestjs/config';
 import type { AuditService } from '../audit/audit.service.js';
 import type { AuthenticatedUser } from '../auth/authenticated-user.js';
 import type { PasswordService } from '../auth/password.service.js';
+import type { Env } from '../config/env.js';
+import { DEMO_ACCOUNT_LOCKED_MESSAGE } from '../demo/demo-protection.js';
 import { Prisma, type User } from '../generated/prisma/client.js';
 import type { PrismaService } from '../prisma/prisma.service.js';
 import { UsersService } from './users.service.js';
@@ -27,13 +30,14 @@ function makeUser(overrides: Partial<User> = {}): User {
     role: 'VENDEDOR',
     active: true,
     tokenVersion: 0,
+    isDemo: false,
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides,
   };
 }
 
-function setup() {
+function setup({ demoMode = false } = {}) {
   const tx = {
     $queryRaw: vi.fn().mockResolvedValue([]),
     user: {
@@ -48,10 +52,13 @@ function setup() {
   };
   const passwords = { hash: vi.fn().mockResolvedValue('$argon2id$novo') };
   const audit = { record: vi.fn() };
+  const configValues: Partial<Env> = { DEMO_MODE: demoMode };
+  const config = { get: vi.fn((key: keyof Env) => configValues[key]) };
   const service = new UsersService(
     prisma as unknown as PrismaService,
     passwords as unknown as PasswordService,
     audit as unknown as AuditService,
+    config as unknown as ConfigService<Env, true>,
   );
   return { service, tx, audit };
 }
@@ -182,6 +189,68 @@ describe('UsersService', () => {
       await expect(
         service.update(admin, 'u2', { email: 'outro@loja.com' }),
       ).rejects.toThrow(new ConflictException('E-mail já cadastrado'));
+    });
+
+    describe('DEMO_MODE', () => {
+      const demoUser = makeUser({ isDemo: true });
+
+      it.each([
+        ['mudar o papel', { role: 'GERENTE' as const }],
+        ['desativar', { active: false }],
+        ['mudar o e-mail', { email: 'outro@loja.com' }],
+      ])('conta demo: recusa %s com 403 e não grava', async (_, dto) => {
+        const { service, tx } = setup({ demoMode: true });
+        tx.user.findUnique.mockResolvedValue(demoUser);
+
+        await expect(service.update(admin, 'u2', dto)).rejects.toThrow(
+          new ForbiddenException(DEMO_ACCOUNT_LOCKED_MESSAGE),
+        );
+        expect(tx.user.update).not.toHaveBeenCalled();
+      });
+
+      it('conta demo: pode mudar o nome', async () => {
+        const { service, tx } = setup({ demoMode: true });
+        tx.user.findUnique.mockResolvedValue(demoUser);
+        tx.user.update.mockResolvedValue({ ...demoUser, name: 'Outro' });
+
+        await expect(
+          service.update(admin, 'u2', { name: 'Outro' }),
+        ).resolves.toMatchObject({ name: 'Outro' });
+      });
+
+      it('conta demo: reenviar o mesmo e-mail e papel não é alteração', async () => {
+        const { service, tx } = setup({ demoMode: true });
+        tx.user.findUnique.mockResolvedValue(demoUser);
+        tx.user.update.mockResolvedValue(demoUser);
+
+        await expect(
+          service.update(admin, 'u2', {
+            email: demoUser.email,
+            role: demoUser.role,
+            active: true,
+          }),
+        ).resolves.toMatchObject({ email: demoUser.email });
+      });
+
+      it('conta comum: pode ser desativada mesmo com DEMO_MODE', async () => {
+        const { service, tx } = setup({ demoMode: true });
+        tx.user.findUnique.mockResolvedValue(makeUser());
+        tx.user.update.mockResolvedValue(makeUser({ active: false }));
+
+        await expect(
+          service.update(admin, 'u2', { active: false }),
+        ).resolves.toMatchObject({ active: false });
+      });
+
+      it('sem DEMO_MODE: conta demo é editada normalmente', async () => {
+        const { service, tx } = setup({ demoMode: false });
+        tx.user.findUnique.mockResolvedValue(demoUser);
+        tx.user.update.mockResolvedValue({ ...demoUser, active: false });
+
+        await expect(
+          service.update(admin, 'u2', { active: false }),
+        ).resolves.toMatchObject({ active: false });
+      });
     });
   });
 

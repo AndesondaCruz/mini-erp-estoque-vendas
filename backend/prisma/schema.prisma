@@ -38,6 +38,11 @@ model User {
   // Incrementado ao trocar a senha ou desativar o usuário. Access tokens
   // emitidos com uma versão antiga deixam de valer na hora.
   tokenVersion Int     @default(0) @map("token_version")
+  // Conta de demonstração, marcada só pelo seed de demo (nenhum DTO aceita
+  // este campo). Com DEMO_MODE=true, a API não deixa trocar a senha, o
+  // e-mail, o papel nem desativar estas contas, para o próximo visitante
+  // continuar conseguindo entrar.
+  isDemo       Boolean @default(false) @map("is_demo")
 
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)

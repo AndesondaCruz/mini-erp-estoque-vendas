@@ -8,6 +8,7 @@ import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { AuditService } from '../audit/audit.service.js';
 import type { Env } from '../config/env.js';
+import { assertDemoAccountUnlocked } from '../demo/demo-protection.js';
 import type { User } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import {
@@ -163,6 +164,10 @@ export class AuthService {
   ): Promise<void> {
     const user = await this.users.findById(userId);
     if (!user) throw new UnauthorizedException('Sessão inválida');
+    assertDemoAccountUnlocked(
+      user,
+      this.config.get('DEMO_MODE', { infer: true }),
+    );
 
     if (!(await this.passwords.verify(user.passwordHash, currentPassword))) {
       // 400, e não 401: um 401 faria o front achar que a sessão expirou.

@@ -149,12 +149,16 @@ jobs:
       - name: Subir o ambiente completo (docker compose)
         run: docker compose up --build --detach --wait --wait-timeout 240
 
-      - name: Migrations, seed e API sem root
+      - name: Migrations, seeds e API sem root
         run: |
           set -e
           # Migrations aplicadas pelo entrypoint num banco vazio.
           docker compose logs api | grep -q "migration"
-          docker compose exec -T api node dist/seed.js
+          # Seed de demo dentro da imagem (banco vazio: sem --reset).
+          docker compose exec -T api node dist/seed-demo.js
+          # O seed do primeiro ADMIN também carrega na imagem; com o ADMIN
+          # demo já criado, ele não cria outro.
+          docker compose exec -T api node dist/seed.js | grep -q "Nada a fazer"
           test "$(docker compose exec -T api whoami)" = "node"
 
       # Tudo entra pela porta do Nginx (8080): front, API e Swagger. O mesmo

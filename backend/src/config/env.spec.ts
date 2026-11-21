@@ -24,6 +24,18 @@ describe('validateEnv', () => {
     });
   });
 
+  it('DEMO_MODE: desligado por padrão, e "false" vira false (não true)', () => {
+    expect(validateEnv(valid).DEMO_MODE).toBe(false);
+    expect(validateEnv({ ...valid, DEMO_MODE: 'false' }).DEMO_MODE).toBe(false);
+    expect(validateEnv({ ...valid, DEMO_MODE: 'true' }).DEMO_MODE).toBe(true);
+  });
+
+  it('DEMO_MODE: recusa valor ambíguo como "1"', () => {
+    expect(() => validateEnv({ ...valid, DEMO_MODE: '1' })).toThrow(
+      /DEMO_MODE deve ser "true" ou "false"/,
+    );
+  });
+
   it('separa a lista de origens do CORS', () => {
     expect(validateEnv(valid).CORS_ORIGINS).toEqual([
       'http://localhost:5173',

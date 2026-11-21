@@ -769,3 +769,32 @@ O teste "venda às 23h30 em Fortaleza conta no dia local" foi rodado com `REPORT
 
 3. **Por que `index.html` sem cache e `/assets` com cache de um ano?**
    Os arquivos de `/assets` têm um hash do conteúdo no nome; um conteúdo novo gera um nome novo, então o antigo pode ficar em cache para sempre. O `index.html` tem sempre o mesmo nome e é ele que aponta para os arquivos atuais: se ficasse em cache, o navegador continuaria carregando a versão antiga depois de um deploy.
+
+## Fase 10c: seed de demonstração e DEMO_MODE
+
+### Conceitos usados
+
+- **Gerar antes, gravar depois.** As tabelas de movimentação e de auditoria são só inserção: um trigger recusa UPDATE e DELETE. Por isso a história de 8 semanas é montada inteira em memória, com as datas certas, e só depois copiada para o banco. A função que gera não conhece o banco e pode ser testada sozinha.
+- **PRNG com semente.** `Math.random()` não aceita semente. O mulberry32 é um gerador pequeno em que a mesma semente produz sempre a mesma sequência: os dados "aleatórios" ficam reproduzíveis, e os testes podem afirmar coisas concretas sobre eles.
+- **Simulação em ordem de tempo.** Vendas, cancelamentos e ajustes de cada dia são processados pelo horário. Se o cancelamento das 15h fosse processado depois da venda das 16h, o `balance_after` das duas ficaria errado.
+- **`TRUNCATE` dentro da transação.** No Postgres, o `TRUNCATE` é desfeito por um `ROLLBACK`. O reset e a carga nova acontecem juntos ou não acontecem: um erro no meio não deixa o banco vazio. E o `TRUNCATE` não dispara os triggers de linha, que só barram UPDATE e DELETE.
+- **Sequence ajustada com `setval`.** As vendas da demo são gravadas com número explícito, o que não avança a sequence. Sem o `setval`, a primeira venda feita pela API tentaria o número 1 e bateria no UNIQUE.
+- **Invariantes conferidos no banco.** O seed contorna os services, então confere no fim, com SQL (inclusive uma função de janela, `SUM() OVER (PARTITION BY ... ORDER BY ...)`), as regras que os services garantiriam.
+- **Proteção por dado, não por convenção.** A coluna `is_demo` acompanha o usuário mesmo que o e-mail mude; um filtro por domínio de e-mail seria contornado trocando o e-mail.
+
+### Conferido nos dois sentidos
+
+- Os testes do gerador passaram de primeira; por isso, uma mutação: o estorno devolvendo uma unidade a mais. O teste "cada cancelamento tem o seu ESTORNO" falhou.
+- Os testes do bloqueio no `UsersService` também: desligando a checagem, os três testes de 403 falharam.
+- Contra a API real com `DEMO_MODE=true`: troca de senha e desativação da conta demo deram 403, uma venda nova recebeu o número 438 (continuando as 437 da demo) e o relatório de 30 dias veio preenchido.
+
+### Perguntas de entrevista
+
+1. **Como você criou um histórico de vendas no passado se a tabela de movimentações não aceita UPDATE?**
+   Gerei a história inteira em memória, em ordem cronológica e já com as datas do passado, e gravei cada linha uma vez, com a data certa. Assim não precisei de UPDATE. Como o seed não passa pelas regras dos services, ele confere no final, com SQL, que o saldo de cada produto é a soma das movimentações e que o total de cada venda é a soma dos itens. Se algo não bater, a transação inteira é desfeita.
+
+2. **Por que os dados da demo são aleatórios mas sempre iguais?**
+   Usei um gerador de números aleatórios com semente fixa. Os dados parecem naturais (mais vendas no sábado, alguns cancelamentos), mas a mesma semente gera sempre a mesma história. Isso permite testar o gerador com afirmações concretas sem que o teste falhe de vez em quando.
+
+3. **Como impedir que um visitante tranque a conta demo para os próximos?**
+   Com `DEMO_MODE=true`, a API recusa com 403 trocar a senha, o e-mail ou o papel e desativar as contas marcadas como demo. O e-mail entrou na lista porque o login é feito por ele: trocá-lo tem o mesmo efeito de trocar a senha. O resto continua livre, e o seed com `--reset` restaura os dados.

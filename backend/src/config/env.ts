@@ -57,6 +57,13 @@ export const envSchema = z.object({
     .min(32, 'JWT_ACCESS_SECRET deve ter pelo menos 32 caracteres'),
   JWT_ACCESS_TTL_SECONDS: z.coerce.number().int().positive().default(900),
   REFRESH_TOKEN_TTL_DAYS: z.coerce.number().int().positive().default(7),
+
+  // Demonstração pública: protege as contas demo (senha, e-mail, papel e
+  // ativação). Não usa z.coerce.boolean(): ele faz Boolean("false") === true.
+  DEMO_MODE: z
+    .enum(['true', 'false'], 'DEMO_MODE deve ser "true" ou "false"')
+    .default('false')
+    .transform((value) => value === 'true'),
 });
 
 export type Env = z.infer<typeof envSchema>;
