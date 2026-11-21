@@ -1,236 +1,157 @@
 # Mini-ERP de estoque e vendas
 
-> Projeto em construção. Este README descreve apenas o que já está implementado.
-> O plano completo, com modelagem, permissões e fases, está em [docs/plano.md](docs/plano.md).
+Sistema web para pequeno comércio controlar produtos, estoque e vendas, com três papéis de usuário (administrador, gerente e vendedor).
 
-Sistema para pequeno comércio controlar produtos, estoque e vendas, com três papéis de usuário (ADMIN, GERENTE e VENDEDOR). O foco técnico é a consistência do estoque: duas vendas simultâneas do último item não podem deixar o saldo negativo.
+**Demonstração:** https://mini-erp-estoque-vendas.vercel.app
+**Documentação da API (Swagger):** https://mini-erp-estoque-vendas.vercel.app/api/docs
 
-## Estado atual
+Para testar sem cadastro, entre com uma das contas de demonstração (senha `demo-mini-erp` para as três):
 
-Fase 0 (fundação) concluída:
+| Papel | E-mail | O que dá para ver |
+|---|---|---|
+| Administrador | `admin.demo@example.com` | tudo, inclusive usuários e auditoria |
+| Gerente | `gerente.demo@example.com` | catálogo, estoque, todas as vendas e relatórios |
+| Vendedor | `vendedor.demo@example.com` | produtos (sem custo) e as próprias vendas |
 
-- API NestJS 12 em TypeScript strict, com prefixo `/api/v1`
-- `GET /api/v1/health`: estado da API e da conexão com o PostgreSQL (503 se o banco cair)
-- Documentação Swagger em `/api/docs`
-- Variáveis de ambiente validadas na inicialização (a API não sobe com configuração inválida)
-- Formato único de erro com `requestId`, logs estruturados (pino), helmet, CORS restrito e rate limiting
-- Prisma 7 configurado com PostgreSQL 16
-- Testes unitários e e2e (Vitest + Supertest, com banco real)
-- Docker Compose com banco e API, e CI no GitHub Actions
+O primeiro acesso depois de um tempo parado é lento: no plano gratuito do Render, a API desliga após 15 minutos sem uso e leva alguns segundos para voltar. Os dados da demonstração são recriados todo dia às 6h (horário de Brasília), então fique à vontade para criar, vender e cancelar.
 
-Fase 1, parte A (autenticação) concluída:
+![Tela inicial do gerente com o alerta de produtos abaixo do estoque mínimo](docs/image/tela-inicio-gerente.png)
 
-| Rota | Descrição |
+## O problema
+
+Num comércio pequeno, o estoque costuma ficar numa planilha que ninguém confia. O sistema resolve isso registrando cada entrada, venda, cancelamento e ajuste, e a parte técnica central é garantir que esse registro nunca fique inconsistente, mesmo quando tudo acontece ao mesmo tempo:
+
+- **Duas vendas da última unidade no mesmo instante.** A baixa do estoque é um único comando no banco que só desconta se ainda houver saldo. Uma das vendas passa e a outra recebe uma mensagem com o saldo disponível; o estoque nunca fica negativo.
+- **O vendedor clica duas vezes em "Registrar venda", ou a rede cai e o navegador repete o pedido.** Cada tentativa leva uma chave de idempotência gerada no navegador. Se o mesmo pedido chegar de novo, a API devolve a venda já criada, sem baixar o estoque outra vez.
+- **Duas vendas com os mesmos produtos em ordens diferentes.** Os itens são sempre baixados na mesma ordem, o que elimina o deadlock entre elas.
+- **Alguém tenta apagar o rastro.** O histórico de estoque e a auditoria são só de inserção: um trigger no PostgreSQL recusa alteração e exclusão, inclusive para o administrador.
+- **Uma venda às 23h30 aparece no dia seguinte do relatório.** Os relatórios fecham os períodos no fuso horário da loja, não em UTC.
+
+## Telas
+
+| | |
 |---|---|
-| `POST /api/v1/auth/login` | Access token (15 min) no corpo; refresh token (7 dias) em cookie `httpOnly`, `SameSite=Strict` |
-| `POST /api/v1/auth/refresh` | Troca o refresh token por um novo (rotação com detecção de reuso) |
-| `POST /api/v1/auth/logout` | Encerra a sessão atual |
-| `GET /api/v1/auth/me` | Dados do usuário autenticado |
-| `PATCH /api/v1/auth/me/password` | Troca a própria senha e encerra todas as sessões |
+| ![Venda registrada com três itens](docs/image/venda-registrada.png) | ![Relatório de faturamento por dia](docs/image/relatorio.png) |
+| Venda registrada: preço e custo copiados no momento da venda | Relatório de vendas por período, com gráfico e tabela acessível |
+| ![Auditoria com o detalhe de uma venda](docs/image/auditoria.png) | ![Tela de login](docs/image/tela-login.png) |
+| Auditoria: quem fez o quê, quando e o que mudou | Login |
 
-- Senhas com argon2id; login com rate limit próprio (5 tentativas por minuto por IP) e mensagem genérica de erro
-- Desativar o usuário ou trocar a senha invalida os tokens já emitidos na hora
-- Auditoria de login, logout, troca de senha e reuso de token, protegida no banco contra alteração e exclusão
-- Migrations aplicadas automaticamente quando o container da API sobe
+## Funcionalidades
 
-Fase 1, parte B (usuários e controle de acesso por papel) concluída:
+- **Catálogo:** produtos, categorias e fornecedores, com busca, filtros, ordenação e paginação que ficam na URL (o F5 mantém a lista).
+- **Estoque:** entrada, saída manual e ajuste de inventário (informando o saldo contado); extrato por produto; alerta de produtos abaixo do mínimo.
+- **Vendas:** venda com vários itens, cancelamento com motivo obrigatório e devolução do estoque; o vendedor só vê as próprias vendas e não cancela.
+- **Relatórios:** vendas e faturamento por dia, semana ou mês, produtos mais vendidos e valor do estoque a custo e a preço de venda.
+- **Usuários e auditoria (administrador):** cadastro, papéis e desativação; registro de logins, vendas, cancelamentos, ajustes, mudanças de preço e acessos negados, com o estado antes e depois.
 
-| Rota | Descrição |
-|---|---|
-| `GET /api/v1/users` | Lista com paginação, busca por nome ou e-mail, filtros por papel e status, e ordenação |
-| `GET /api/v1/users/:id` | Busca um usuário |
-| `POST /api/v1/users` | Cria um usuário |
-| `PATCH /api/v1/users/:id` | Edita nome, e-mail, papel ou status; desativar encerra as sessões do usuário |
+## Segurança
 
-- Todas as rotas de usuários são exclusivas do ADMIN
-- Controle de acesso negado por padrão: uma rota sem `@Public()` ou `@Roles(...)` responde 403
-- Trocar o papel de alguém vale na requisição seguinte, sem novo login
-- O sistema não permite ficar sem ADMIN ativo, nem em alterações simultâneas
-- Criação e edição de usuários entram na auditoria, com o estado antes e depois
-
-Fase 2, parte A (categorias e fornecedores) concluída:
-
-| Rota | Quem acessa | Descrição |
-|---|---|---|
-| `GET /api/v1/categories` | todos | Lista com paginação, busca por nome e ordenação |
-| `POST /api/v1/categories`, `PATCH /api/v1/categories/:id` | ADMIN, GERENTE | Cria e renomeia; nome repetido, mesmo com outra capitalização, responde 409 |
-| `DELETE /api/v1/categories/:id` | ADMIN, GERENTE | Exclui a categoria |
-| `GET /api/v1/suppliers`, `GET /api/v1/suppliers/:id` | ADMIN, GERENTE | Lista com busca por nome ou CNPJ e filtro de status |
-| `POST /api/v1/suppliers`, `PATCH /api/v1/suppliers/:id` | ADMIN, GERENTE | Cria e edita; `null` apaga um campo opcional e `active: true` reativa |
-| `DELETE /api/v1/suppliers/:id` | ADMIN, GERENTE | Desativa o fornecedor, sem apagar |
-
-- CNPJ no formato alfanumérico da Receita Federal (os numéricos continuam válidos), aceito com ou sem máscara e gravado normalizado
-- Formato do CNPJ, nome não vazio e e-mail em minúsculas garantidos também por CHECK no banco
-
-Fase 2, parte B (produtos) concluída:
-
-| Rota | Quem acessa | Descrição |
-|---|---|---|
-| `GET /api/v1/products` | todos | Lista com busca por nome ou SKU, filtros por categoria, fornecedor, status e estoque baixo, paginação e ordenação |
-| `GET /api/v1/products/:id` | todos | Busca um produto |
-| `POST /api/v1/products`, `PATCH /api/v1/products/:id` | ADMIN, GERENTE | Cria (com saldo 0) e edita; reativar (`active: true`) é só do ADMIN |
-| `DELETE /api/v1/products/:id` | ADMIN | Desativa o produto, sem apagar |
-
-- O VENDEDOR não recebe o preço de custo (a chave `costPrice` não aparece na resposta) e só vê produtos ativos
-- Dinheiro trafega como texto com até 2 casas (`"12.50"`) e é gravado em `DECIMAL(12,2)`, sem passar por ponto flutuante
-- O saldo (`currentStock`) não é editável pela API de produtos: só vai mudar por movimentação de estoque (Fase 3)
-- Mudança de preço é auditada com o valor antes e depois, sob lock da linha: alterações simultâneas formam um histórico sem buracos
-- Saldo, mínimo e preços nunca negativos, garantidos por CHECK no banco; categoria com produtos não pode ser excluída
-
-Fase 3 (movimentações de estoque) concluída:
-
-| Rota | Quem acessa | Descrição |
-|---|---|---|
-| `POST /api/v1/stock/movements` | ADMIN, GERENTE | ENTRADA e SAIDA com `quantity`; AJUSTE com `countedStock` (o saldo contado). SAIDA e AJUSTE exigem motivo |
-| `GET /api/v1/stock/movements` | ADMIN, GERENTE | Histórico com filtros por produto, tipo, responsável e período |
-| `GET /api/v1/products/:id/movements` | ADMIN, GERENTE | Extrato do produto, do mais recente para o mais antigo |
-
-- Saída com baixa atômica e condicional: duas saídas simultâneas da última unidade nunca passam juntas, e a recusada recebe 409 com o saldo disponível
-- Ajuste de inventário calcula a diferença com a linha do produto travada, então uma saída simultânea não se perde
-- Um único serviço altera o saldo, sempre gravando a movimentação na mesma transação: saldo = soma das movimentações, conferido por teste
-- Histórico imutável (trigger no banco bloqueia alteração e exclusão); saída manual e ajuste vão para a auditoria
-
-Fase 4 (vendas) concluída:
-
-| Rota | Quem acessa | Descrição |
-|---|---|---|
-| `POST /api/v1/sales` | todos | Registra uma venda com vários itens. Exige o header `Idempotency-Key` (UUID) |
-| `GET /api/v1/sales` | todos | ADMIN e GERENTE veem todas; VENDEDOR só as próprias. Filtros por período, status e vendedor |
-| `GET /api/v1/sales/:id` | todos | Detalhe; para o VENDEDOR, a venda de outra pessoa responde 404 |
-
-- Todos os itens são baixados numa única transação: se um item não tem saldo, a venda inteira é desfeita e a API responde 409 com o produto e o saldo disponível
-- O preço vem sempre do banco, nunca do cliente, e fica copiado na venda: mudar o preço depois não altera vendas registradas
-- Os itens são baixados sempre na mesma ordem, o que evita deadlock entre vendas simultâneas com os mesmos produtos em ordens diferentes
-- Repetir a requisição com a mesma `Idempotency-Key` (duplo clique, retry de rede) devolve a venda já criada, sem baixar o estoque de novo
-- O VENDEDOR não vê o custo dos itens; cada venda vai para a auditoria
-
-Fase 5 (cancelamento de venda) concluída:
-
-| Rota | Quem acessa | Descrição |
-|---|---|---|
-| `POST /api/v1/sales/:id/cancel` | ADMIN, GERENTE | Cancela a venda com motivo obrigatório e devolve o estoque de todos os itens |
-
-- O VENDEDOR não cancela vendas, nem as próprias: vender, receber em dinheiro e cancelar apagaria o registro do caixa
-- Dois cancelamentos simultâneos da mesma venda: só um vence, e o estoque volta uma vez só (o outro recebe 409)
-- O estoque volta mesmo que o produto tenha sido desativado depois da venda
-- A venda cancelada continua no histórico, com quem cancelou, quando e por quê, e vai para a auditoria
-
-Fase 6 (alertas e relatórios) concluída. Com ela, o back-end do MVP está completo:
-
-| Rota | Quem acessa | Descrição |
-|---|---|---|
-| `GET /api/v1/stock/alerts` | todos | Produtos ativos com saldo menor ou igual ao mínimo, pela maior falta, sem custo |
-| `GET /api/v1/reports/sales?from=&to=&groupBy=day\|week\|month` | ADMIN, GERENTE | Vendas, faturamento e ticket médio por período; períodos sem venda aparecem zerados |
-| `GET /api/v1/reports/top-products?from=&to=&limit=` | ADMIN, GERENTE | Mais vendidos por quantidade, com faturamento |
-| `GET /api/v1/reports/stock-value` | ADMIN, GERENTE | Valor do estoque a custo e a preço de venda, por categoria |
-
-- `from` e `to` são datas do calendário (`2026-11-17`), inclusivas, interpretadas no fuso da loja (`REPORTS_TIMEZONE`, padrão `America/Fortaleza`): uma venda às 23h30 conta no dia certo, mesmo já sendo o dia seguinte em UTC
-- Os relatórios consideram só vendas concluídas: vender e cancelar não altera os números
-- Agregações feitas no SQL, com o fuso e o agrupamento passados como parâmetros da consulta
-
-Fase 7 (base do front-end) concluída:
-
-- React + Vite, com login, sessão restaurada ao recarregar a página e saída
-- Access token só em memória (nunca no `localStorage`); o refresh token continua no cookie `httpOnly`
-- Renovação automática do token quando ele expira: várias chamadas com 401 ao mesmo tempo disparam uma única renovação
-- Menu e rotas por papel (a tela de "sem permissão" é só experiência: quem protege os dados é a API)
-- Erros da API com a mensagem e o código da requisição, para o suporte
-
-Fase 8, parte A (telas de catálogo) concluída:
-
-- Produtos, categorias e fornecedores: listagem com busca, filtros, ordenação e paginação, e formulários de criar e editar
-- Página, busca, filtros e ordenação ficam na URL: o F5 e o botão voltar mantêm a lista, e uma ordenação inválida digitada no endereço volta ao padrão
-- Por papel: o VENDEDOR vê produtos sem custo e sem botões de cadastro; só o ADMIN desativa e reativa produtos; categorias e fornecedores são de ADMIN e GERENTE
-- Preço digitado como "5,50" vai para a API como "5.50"; os erros de validação da API aparecem em lista, uma mensagem por campo
-- As telas de estoque, vendas, relatórios e usuários chegam nas próximas fases
+- Senhas com argon2id; access token de 15 minutos só em memória no navegador e refresh token em cookie `HttpOnly`, `Secure` e `SameSite=Strict`, com rotação e detecção de reuso.
+- Trocar a senha ou desativar um usuário invalida na hora os tokens já emitidos.
+- Controle de acesso por papel negado por padrão: uma rota sem permissão declarada responde 403.
+- Rate limiting por IP, bloqueio de login por conta (5 falhas em 15 minutos), helmet, CORS restrito e CSP sem `unsafe-inline` no front.
+- Consultas parametrizadas e ordenação só por uma lista de campos permitidos.
+- Na demonstração, as contas demo não podem ter senha, e-mail, papel ou ativação alterados, para o próximo visitante continuar conseguindo entrar.
 
 ## Stack
 
-- Back-end: NestJS 12, TypeScript 6, Prisma 7, PostgreSQL 16
-- Front-end: React 19, Vite 8, TypeScript 6, React Router, TanStack Query, React Hook Form + zod, Tailwind 4
-- Testes: Vitest e Supertest (API); Testing Library, MSW e axe-core (front)
-- Infraestrutura: Docker Compose, GitHub Actions, Dependabot
+- **Back-end:** NestJS 12, TypeScript 6 (strict), Prisma 7, PostgreSQL, zod e class-validator, pino (logs estruturados), Swagger
+- **Front-end:** React 19, Vite 8, React Router, TanStack Query, React Hook Form com zod, Tailwind 4
+- **Testes:** Vitest e Supertest com banco real (API); Testing Library, MSW e axe-core (front)
+- **Infraestrutura:** Docker Compose com Nginx, GitHub Actions (lint, testes, build e smoke test do Compose), Dependabot
+- **Produção:** front na Vercel, API no Render (Docker) e banco no Neon (PostgreSQL)
+
+```
+navegador ──> Vercel (front + repasse de /api) ──> Render (API NestJS) ──> Neon (PostgreSQL)
+```
+
+O navegador fala com uma origem só: a Vercel repassa `/api` para o Render, como o Nginx faz no Compose local. Assim o cookie `SameSite=Strict` funciona e o CORS nem entra em jogo.
 
 ## Como rodar
 
-Pré-requisitos: Docker com Compose, Node 22.12 ou superior e npm 11.
+Pré-requisitos: Docker com Compose, Node 22 (veja `.nvmrc`) e npm.
 
-### Tudo em containers (banco + API + front)
+### Tudo em containers
 
 ```bash
-docker compose up --build --wait
+docker compose up --build --detach --wait
+docker compose exec -T api node dist/seed-demo.js
 ```
+
+O primeiro comando sobe banco, API e front; as migrations são aplicadas quando a API sobe. O segundo cria as contas e os dados de demonstração (cerca de 8 semanas de vendas). Para recriar os dados depois, use `seed-demo.js --reset`, que **apaga** o banco do Compose antes.
 
 Tudo entra pelo Nginx, na porta 8080:
 
-- Aplicação: http://localhost:8080
-- Health: http://localhost:8080/api/v1/health
+- Aplicação: http://localhost:8080 (contas da tabela acima, senha `demo-mini-erp`)
 - Swagger: http://localhost:8080/api/docs
 
-A API não é publicada direto: ela confia no IP que o Nginx informa (`TRUST_PROXY=1`), e uma porta aberta permitiria forjar esse IP para escapar do rate limit.
+Smoke test do ambiente, o mesmo do CI (depois do seed de demonstração): `sh docker/smoke-test.sh`.
 
-As migrations são aplicadas automaticamente. Para criar o primeiro ADMIN:
+Para parar: `docker compose down` (com `--volumes`, apaga também os dados).
 
-```bash
-docker compose exec api node dist/seed.js
-```
+O cookie de sessão sai com `Secure`. Chrome e Firefox aceitam esse cookie em `http://localhost`; em navegadores que não aceitam, o login funciona, mas a sessão não sobrevive a um F5.
 
-Login local: `admin@mini-erp.local` / `admin-local-123` (credenciais só para o ambiente local).
-
-Smoke test do ambiente (o mesmo que roda no CI): `sh docker/smoke-test.sh`. Ele esgota o limite de tentativas de login do seu IP por um minuto.
-
-Para parar: `docker compose down` (adicione `--volumes` para apagar também os dados do banco).
-
-O cookie de refresh sai com `Secure` (a API roda com `NODE_ENV=production`). Chrome e Firefox aceitam esse cookie em `http://localhost`; em navegadores que não aceitam, o login funciona, mas a sessão não sobrevive a um F5.
-
-### Desenvolvimento (API fora do container)
+### Desenvolvimento
 
 ```bash
-docker compose up -d --wait db   # só o PostgreSQL, na porta 5433
+docker compose up --detach --wait db   # só o PostgreSQL, na porta 5433
 cd backend
 cp .env.example .env
 npm ci
-npm run db:deploy                # aplica as migrations
-npm run seed                     # cria o ADMIN definido em SEED_ADMIN_* no .env
-npm run start:dev
+npm run db:deploy                      # aplica as migrations
+npm run seed:demo                      # dados de demonstração (senha em DEMO_PASSWORD)
+npm run start:dev                      # API em http://localhost:3000
 ```
 
-Em outro terminal, o front-end (com a API rodando na porta 3000):
+Em outro terminal:
 
 ```bash
 cd frontend
 npm ci
-npm run dev                      # http://localhost:5173
+npm run dev                            # http://localhost:5173
 ```
 
-O Vite repassa as chamadas `/api` para a API (`VITE_API_PROXY_TARGET`, padrão `http://localhost:3000`). Assim o front e a API ficam na mesma origem, e o cookie de refresh (`SameSite=Strict`) funciona.
+O Vite repassa `/api` para a API, então front e API ficam na mesma origem, como em produção.
 
-Para gerar um `JWT_ACCESS_SECRET` próprio:
-`node -e "console.log(require('node:crypto').randomBytes(48).toString('base64url'))"`
-
-### Testes e verificações
+### Testes
 
 Dentro de `backend/`, com o banco do Compose rodando:
 
 ```bash
-npm run format:check
 npm run lint
 npm run typecheck
 npm test            # unitários
-npm run test:e2e    # e2e, usa o banco mini_erp_test
-npm run build
+npm run test:e2e    # e2e com Supertest, no banco mini_erp_test
 ```
 
-Dentro de `frontend/` (não precisa da API: os testes usam uma API simulada com MSW):
+Dentro de `frontend/` (os testes usam uma API simulada com MSW, sem precisar da API):
 
 ```bash
-npm run format:check
 npm run lint        # inclui regras de acessibilidade (jsx-a11y)
 npm run typecheck
 npm test            # Testing Library + axe-core
-npm run build
 ```
 
-## Decisões técnicas
+Em máquinas com pouca memória, limite os workers do front: `npx vitest run --maxWorkers=3`.
 
-As decisões e os trade-offs de cada fase estão em [docs/aprendizados.md](docs/aprendizados.md).
+Além dos testes automatizados, o sistema foi testado à mão no navegador seguindo um [roteiro de 50 itens](docs/roteiro-teste-manual.md), sem falhas.
+
+## Decisões técnicas e trade-offs
+
+O plano completo, com modelagem, matriz de permissões, riscos e as mais de 100 decisões numeradas, está em [docs/plano.md](docs/plano.md). Os conceitos de cada fase, com perguntas de entrevista, estão em [docs/aprendizados.md](docs/aprendizados.md). Algumas das principais:
+
+- **Saldo desnormalizado, mas sempre igual à soma das movimentações.** O saldo fica no produto para a listagem ser rápida, e um único serviço o altera, sempre junto com a movimentação, na mesma transação. Um teste confere que saldo e soma batem.
+- **Preço copiado na venda.** O preço e o custo de cada item vêm do banco (nunca do cliente) e ficam gravados na venda: mudar o preço amanhã não muda o faturamento de ontem.
+- **Cancelamento só por gerente e administrador.** Se o vendedor pudesse cancelar a própria venda, poderia vender, receber em dinheiro e apagar o registro do caixa.
+- **Dados de demonstração gerados em memória e gravados de uma vez.** Como o histórico não aceita UPDATE, a história de 8 semanas nasce com as datas certas; o seed confere no final que saldos e totais batem, ou desfaz tudo.
+- **`trust proxy` medido em produção.** O valor foi escolhido comparando o IP gravado na auditoria com o IP real, pelos dois caminhos de entrada e com um cabeçalho `X-Forwarded-For` forjado. Pela Vercel, a API vê o IP do proxy; por isso existe o bloqueio de login por conta, que não depende do IP.
+- **Gráficos em SVG feitos à mão, sem biblioteca,** para não pesar no carregamento; as páginas são carregadas sob demanda, e o pacote principal caiu de 578 kB para 251 kB.
+
+## Limitações e próximos passos
+
+- **API "dorme" no plano gratuito:** o primeiro acesso depois de 15 minutos parado é lento.
+- **Deploy da API disparado à mão:** o deploy automático do Render a cada merge ainda não está funcionando; o front na Vercel é atualizado automaticamente.
+- **Rate limit por IP mais fraco pela Vercel:** a API vê os IPs de saída da Vercel, que são compartilhados entre visitantes. O bloqueio por conta cobre a força bruta contra uma conta específica.
+- **Reset diário depende do GitHub Actions,** que desativa workflows agendados depois de 60 dias sem atividade no repositório.
+- **Fora do escopo:** pagamentos, emissão de nota fiscal, várias lojas, devolução parcial de venda (o cancelamento é sempre total) e recuperação de senha por e-mail.
+- **Próximos passos:** botões "entrar como" na tela de login para a demonstração, deploy automático da API e migração para o TypeScript 7 quando as dependências permitirem.
