@@ -3,7 +3,7 @@
 # Usado pelo CI e pode ser rodado localmente, na raiz do repositório:
 #
 #   docker compose up --build --detach --wait
-#   docker compose exec -T api node dist/seed.js   # cria o ADMIN local, se não existir
+#   docker compose exec -T api node dist/seed-demo.js --reset   # APAGA o banco e cria a demo
 #   sh docker/smoke-test.sh
 #
 # Atenção: as tentativas de login no fim esgotam o rate limit do login
@@ -30,10 +30,19 @@ if curl --silent --max-time 3 --output /dev/null http://localhost:3000/api/v1/he
 fi
 
 # Login e refresh pelo cookie, atravessando o proxy.
-curl --fail --silent --cookie-jar "$J" -X POST $W/api/v1/auth/login \
+# Usa a conta demo (seed-demo.js, senha padrão do Compose).
+LOGIN=$(curl --fail --silent --cookie-jar "$J" -X POST $W/api/v1/auth/login \
   -H 'Content-Type: application/json' \
-  -d '{"email":"admin@mini-erp.local","password":"admin-local-123"}' | grep -q '"role":"ADMIN"'
+  -d '{"email":"admin.demo@example.com","password":"demo-mini-erp"}')
+echo "$LOGIN" | grep -q '"role":"ADMIN"'
+TOKEN=$(echo "$LOGIN" | sed -n 's/.*"accessToken":"\([^"]*\)".*/\1/p')
 curl --fail --silent --cookie "$J" -X POST $W/api/v1/auth/refresh | grep -q '"accessToken"'
+
+# Dados da demo presentes, e DEMO_MODE protegendo a conta demo.
+curl --fail --silent -H "Authorization: Bearer $TOKEN" "$W/api/v1/sales?pageSize=1" | grep -q '"number":'
+test "$(curl --silent --output /dev/null --write-out '%{http_code}' -X PATCH $W/api/v1/auth/me/password \
+  -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"currentPassword":"demo-mini-erp","newPassword":"outra-senha-forte-123"}')" = 403
 
 # X-Forwarded-For forjado não escapa do rate limit do login (5 por minuto).
 LIMITED=no
@@ -46,4 +55,4 @@ done
 test "$LIMITED" = yes
 
 test "$(docker compose exec -T web whoami)" = "nginx"
-echo "Front, proxy, cache, CSP, cookie de refresh e rate limit funcionando; web sem root."
+echo "Front, proxy, cache, CSP, cookie de refresh, dados e proteção da demo e rate limit funcionando; web sem root."

@@ -53,6 +53,11 @@ services:
       SEED_ADMIN_NAME: Administrador
       SEED_ADMIN_EMAIL: admin@mini-erp.local
       SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:-admin-local-123}
+      # Este Compose é a forma de avaliar o projeto localmente: protege as
+      # contas demo e permite "node dist/seed-demo.js --reset" (que, com
+      # NODE_ENV=production, só roda com DEMO_MODE=true).
+      DEMO_MODE: ${DEMO_MODE:-true}
+      DEMO_PASSWORD: ${DEMO_PASSWORD:-demo-mini-erp}
     # Sem "ports": a API só é acessível pela rede interna do Compose (pelo
     # Nginx). Para chamar a API direto, use o modo de desenvolvimento.
     depends_on:

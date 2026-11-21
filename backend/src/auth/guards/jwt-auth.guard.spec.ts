@@ -13,6 +13,7 @@ const activeUser: User = {
   role: 'VENDEDOR',
   active: true,
   tokenVersion: 3,
+  isDemo: false,
   createdAt: new Date(),
   updatedAt: new Date(),
 };

@@ -41,6 +41,7 @@ export async function createUser(
     role: Role;
     active: boolean;
     password: string;
+    isDemo: boolean;
   }> = {},
 ): Promise<User> {
   const passwordHash = await app
@@ -52,6 +53,7 @@ export async function createUser(
       email: overrides.email ?? `user-${crypto.randomUUID()}@teste.com`,
       role: overrides.role ?? 'VENDEDOR',
       active: overrides.active ?? true,
+      isDemo: overrides.isDemo ?? false,
       passwordHash,
     },
   });

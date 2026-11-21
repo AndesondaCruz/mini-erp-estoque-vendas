@@ -1,12 +1,14 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   UnauthorizedException,
 } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
 import type { JwtService } from '@nestjs/jwt';
 import type { AuditService } from '../audit/audit.service.js';
 import type { Env } from '../config/env.js';
+import { DEMO_ACCOUNT_LOCKED_MESSAGE } from '../demo/demo-protection.js';
 import type { User } from '../generated/prisma/client.js';
 import type { PrismaService } from '../prisma/prisma.service.js';
 import type { UsersService } from '../users/users.service.js';
@@ -22,11 +24,12 @@ const user: User = {
   role: 'GERENTE',
   active: true,
   tokenVersion: 2,
+  isDemo: false,
   createdAt: new Date(),
   updatedAt: new Date(),
 };
 
-function setup() {
+function setup({ demoMode = false } = {}) {
   const tx = { user: { update: vi.fn() } };
   const prisma = {
     $transaction: vi.fn((fn: (t: typeof tx) => unknown) => fn(tx)),
@@ -47,7 +50,14 @@ function setup() {
   };
   const jwt = { signAsync: vi.fn().mockResolvedValue('access-token') };
   const audit = { record: vi.fn() };
-  const config = { get: vi.fn().mockReturnValue(900) };
+  // Responde por chave: um mockReturnValue único faria DEMO_MODE valer 900.
+  const configValues: Partial<Env> = {
+    JWT_ACCESS_TTL_SECONDS: 900,
+    DEMO_MODE: demoMode,
+  };
+  const config = {
+    get: vi.fn((key: keyof Env) => configValues[key]),
+  };
 
   const service = new AuthService(
     prisma as unknown as PrismaService,
@@ -230,6 +240,37 @@ describe('AuthService', () => {
         },
       });
       expect(refreshTokens.revokeAllForUser).toHaveBeenCalledWith('u1', tx);
+    });
+
+    it('DEMO_MODE: conta demo não troca a senha (403) e nada é gravado', async () => {
+      const { service, tx, users, passwords } = setup({ demoMode: true });
+      users.findById.mockResolvedValue({ ...user, isDemo: true });
+      passwords.verify.mockResolvedValue(true);
+
+      await expect(
+        service.changePassword('u1', 'antiga', 'nova-senha-123'),
+      ).rejects.toThrow(new ForbiddenException(DEMO_ACCOUNT_LOCKED_MESSAGE));
+      expect(tx.user.update).not.toHaveBeenCalled();
+    });
+
+    it('DEMO_MODE: conta comum troca a senha normalmente', async () => {
+      const { service, tx, users, passwords } = setup({ demoMode: true });
+      users.findById.mockResolvedValue(user);
+      passwords.verify.mockResolvedValue(true);
+
+      await service.changePassword('u1', 'antiga', 'nova-senha-123');
+
+      expect(tx.user.update).toHaveBeenCalled();
+    });
+
+    it('sem DEMO_MODE: até a conta demo troca a senha (ambiente local)', async () => {
+      const { service, tx, users, passwords } = setup({ demoMode: false });
+      users.findById.mockResolvedValue({ ...user, isDemo: true });
+      passwords.verify.mockResolvedValue(true);
+
+      await service.changePassword('u1', 'antiga', 'nova-senha-123');
+
+      expect(tx.user.update).toHaveBeenCalled();
     });
   });
 });

@@ -5,6 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { AuditService } from '../audit/audit.service.js';
 import type { AuthenticatedUser } from '../auth/authenticated-user.js';
 import { PasswordService } from '../auth/password.service.js';
@@ -14,6 +15,8 @@ import {
   paginated,
   toSkipTake,
 } from '../common/pagination/pagination.js';
+import type { Env } from '../config/env.js';
+import { assertDemoAccountUnlocked } from '../demo/demo-protection.js';
 import { Prisma, type Role, type User } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import type { CreateUserDto } from './dto/create-user.dto.js';
@@ -45,6 +48,7 @@ export class UsersService {
     private readonly prisma: PrismaService,
     private readonly passwords: PasswordService,
     private readonly audit: AuditService,
+    private readonly config: ConfigService<Env, true>,
   ) {}
 
   /** E-mails são sempre gravados e buscados em minúsculas. */
@@ -164,6 +168,15 @@ export class UsersService {
         if (actor.id === id && (losesRole || deactivates)) {
           throw new ForbiddenException(
             'Você não pode alterar o próprio papel nem desativar a si mesmo',
+          );
+        }
+
+        const changesEmail =
+          changes.email !== undefined && changes.email !== current.email;
+        if (losesRole || deactivates || changesEmail) {
+          assertDemoAccountUnlocked(
+            current,
+            this.config.get('DEMO_MODE', { infer: true }),
           );
         }
 
