@@ -217,7 +217,9 @@ export function AuditPage() {
                     <td className="whitespace-nowrap px-3 py-2">
                       {formatDateTime(log.createdAt)}
                     </td>
-                    <td className="px-3 py-2">
+                    {/* Largura mínima: sem ela, "Gustavo Gerente (demo)"
+                        quebrava em três linhas ao lado dos detalhes. */}
+                    <td className="min-w-44 px-3 py-2">
                       {log.user ? (
                         <button
                           type="button"

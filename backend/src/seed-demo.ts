@@ -183,6 +183,8 @@ async function insertDataset(
 
   const productIds = new Map(data.products.map((p) => [p.sku, randomUUID()]));
   const productId = (sku: string): string => mustGet(productIds, sku);
+  const productNames = new Map(data.products.map((p) => [p.sku, p.name]));
+  const productName = (sku: string): string => mustGet(productNames, sku);
   const adminId = userId(DEMO_ACCOUNTS.admin);
   await tx.product.createMany({
     data: data.products.map((p) => ({
@@ -268,6 +270,8 @@ async function insertDataset(
         status: 'CONCLUIDA',
         items: s.items.map((i) => ({
           productId: productId(i.sku),
+          sku: i.sku,
+          name: productName(i.sku),
           quantity: i.quantity,
           unitPrice: centsToDecimal(i.unitPriceCents),
         })),

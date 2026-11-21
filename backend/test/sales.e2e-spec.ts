@@ -395,6 +395,19 @@ describe('Vendas (e2e)', () => {
       });
       expect(log.entityId).toBe(sale.body.id);
       expect(log.after).toMatchObject({ total: '11.00', status: 'CONCLUIDA' });
+      // SKU e nome da época, para a tela de auditoria não depender do
+      // cadastro atual do produto.
+      expect(log.after).toMatchObject({
+        items: [
+          {
+            productId: a.id,
+            sku: a.sku,
+            name: a.name,
+            quantity: 2,
+            unitPrice: '5.50',
+          },
+        ],
+      });
     });
   });
 

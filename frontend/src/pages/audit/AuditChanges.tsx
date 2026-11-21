@@ -62,8 +62,57 @@ export function formatAuditValue(key: string, value: unknown): string {
   ) {
     return value.map((v) => formatAuditValue(key, v)).join(', ');
   }
-  // Estrutura (ex.: itens da venda): o JSON compacto, sem perder nada.
+  // Outra estrutura: o JSON compacto, sem perder nada. Itens de venda têm
+  // formato próprio (AuditValue).
   return JSON.stringify(value);
+}
+
+/** Item de venda como a auditoria grava (SALE_CREATED). */
+interface SaleItemSnapshot {
+  quantity: number;
+  unitPrice?: string;
+  productId?: string;
+  // Só nos registros gravados depois de 21/11/2026.
+  sku?: string;
+  name?: string;
+}
+
+const isSaleItem = (value: unknown): value is SaleItemSnapshot =>
+  typeof value === 'object' &&
+  value !== null &&
+  typeof (value as { quantity?: unknown }).quantity === 'number';
+
+const isSaleItemList = (value: unknown): value is SaleItemSnapshot[] =>
+  Array.isArray(value) && value.length > 0 && value.every(isSaleItem);
+
+/**
+ * "5 × Arroz 5 kg (MER-ARROZ-5K) a R$ 28,90". Registro antigo, sem nome,
+ * mostra o começo do id do produto em vez do JSON.
+ */
+export function formatSaleItem(item: SaleItemSnapshot): string {
+  const product = item.name
+    ? item.sku
+      ? `${item.name} (${item.sku})`
+      : item.name
+    : item.productId
+      ? `produto ${item.productId.slice(0, 8)}`
+      : 'produto';
+  const price = item.unitPrice ? ` a ${formatMoney(item.unitPrice)}` : '';
+  return `${item.quantity} × ${product}${price}`;
+}
+
+/** Valor de uma célula: itens de venda viram lista; o resto, texto. */
+function AuditValue({ field, value }: { field: string; value: unknown }) {
+  if (field === 'items' && isSaleItemList(value)) {
+    return (
+      <ul className="space-y-0.5">
+        {value.map((item, index) => (
+          <li key={item.productId ?? index}>{formatSaleItem(item)}</li>
+        ))}
+      </ul>
+    );
+  }
+  return <>{formatAuditValue(field, value)}</>;
 }
 
 const same = (a: unknown, b: unknown) =>
@@ -144,12 +193,12 @@ export function AuditChanges({ log }: { log: AuditLog }) {
                 </th>
                 {showBefore && (
                   <td className="px-2 py-1">
-                    {formatAuditValue(row.key, row.before)}
+                    <AuditValue field={row.key} value={row.before} />
                   </td>
                 )}
                 {showAfter && (
                   <td className="px-2 py-1">
-                    {formatAuditValue(row.key, row.after)}
+                    <AuditValue field={row.key} value={row.after} />
                   </td>
                 )}
               </tr>
