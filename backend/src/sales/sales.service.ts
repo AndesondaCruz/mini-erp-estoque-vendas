@@ -147,8 +147,12 @@ export class SalesService {
               sellerId: saved.sellerId,
               total: formatMoney(saved.total),
               status: saved.status,
+              // SKU e nome da época: a auditoria não depende do cadastro
+              // atual do produto para ser lida.
               items: saved.items.map((i) => ({
                 productId: i.productId,
+                sku: i.product.sku,
+                name: i.product.name,
                 quantity: i.quantity,
                 unitPrice: formatMoney(i.unitPrice),
               })),

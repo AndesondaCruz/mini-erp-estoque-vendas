@@ -1,9 +1,15 @@
-import { screen, waitFor, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { catalog } from '../../test/api-mock';
 import { expectNoA11yViolations } from '../../test/axe';
 import { renderAs } from '../../test/render';
-import { diffRows, formatAuditValue } from './AuditChanges';
+import type { AuditLog } from '../../lib/types';
+import {
+  AuditChanges,
+  diffRows,
+  formatAuditValue,
+  formatSaleItem,
+} from './AuditChanges';
 
 const table = () =>
   screen.findByRole('table', { name: 'Registros de auditoria' });
@@ -158,5 +164,80 @@ describe('formatação dos detalhes', () => {
     expect(diffRows(null, { a: 1 })).toEqual([
       { key: 'a', before: undefined, after: 1, changed: false },
     ]);
+  });
+});
+
+describe('itens de venda na auditoria', () => {
+  const saleLog = (items: unknown[]): AuditLog => ({
+    id: 'log-1',
+    action: 'SALE_CREATED',
+    user: { id: 'u1', name: 'Vitor', email: 'vitor@example.com' },
+    entity: 'Sale',
+    entityId: 's1',
+    before: null,
+    after: { number: 440, total: '199.83', items },
+    metadata: null,
+    ip: null,
+    createdAt: '2026-11-21T18:00:00.000Z',
+  });
+
+  it('item com nome e SKU (registros novos)', () => {
+    expect(
+      formatSaleItem({
+        productId: '987e7a1f-b871-4e15-9829-b045137a0f2b',
+        sku: 'MER-ARROZ-5K',
+        name: 'Arroz branco tipo 1 5 kg',
+        quantity: 5,
+        unitPrice: '28.90',
+      }),
+    ).toMatch(/^5 × Arroz branco tipo 1 5 kg \(MER-ARROZ-5K\) a R\$\s28,90$/);
+  });
+
+  it('registro antigo, sem nome: começo do id, nunca o JSON', () => {
+    expect(
+      formatSaleItem({
+        productId: '987e7a1f-b871-4e15-9829-b045137a0f2b',
+        quantity: 2,
+        unitPrice: '9.49',
+      }),
+    ).toMatch(/^2 × produto 987e7a1f a R\$\s9,49$/);
+  });
+
+  it('a tabela de detalhes mostra os itens como lista, sem JSON', () => {
+    render(
+      <AuditChanges
+        log={saleLog([
+          {
+            productId: 'p1',
+            sku: 'A-1',
+            name: 'Arroz',
+            quantity: 5,
+            unitPrice: '28.90',
+          },
+          {
+            productId: 'p2',
+            sku: 'F-1',
+            name: 'Feijão',
+            quantity: 4,
+            unitPrice: '9.49',
+          },
+        ])}
+      />,
+    );
+
+    const items = screen.getAllByRole('listitem').map((li) => li.textContent);
+    expect(items).toHaveLength(2);
+    expect(items[0]).toMatch(/^5 × Arroz \(A-1\)/);
+    expect(items[1]).toMatch(/^4 × Feijão \(F-1\)/);
+    expect(screen.queryByText(/productId/)).not.toBeInTheDocument();
+  });
+
+  it('a lista de itens não tem violações de acessibilidade (axe)', async () => {
+    const { container } = render(
+      <AuditChanges
+        log={saleLog([{ productId: 'p1', name: 'Arroz', quantity: 1 }])}
+      />,
+    );
+    await expectNoA11yViolations(container);
   });
 });
