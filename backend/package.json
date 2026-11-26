@@ -28,11 +28,11 @@
     "seed:demo": "nest build && node dist/seed-demo.js"
   },
   "dependencies": {
-    "@nestjs/common": "^12.0.1",
+    "@nestjs/common": "^12.6.0",
     "@nestjs/config": "^12.1.1",
-    "@nestjs/core": "^12.0.1",
+    "@nestjs/core": "^12.6.0",
     "@nestjs/jwt": "^12.0.5",
-    "@nestjs/platform-express": "^12.0.1",
+    "@nestjs/platform-express": "^12.6.0",
     "@nestjs/swagger": "^12.1.2",
     "@nestjs/throttler": "^6.8.0",
     "@prisma/adapter-pg": "7.10.1",
@@ -52,9 +52,9 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@nestjs/cli": "^12.0.0",
-    "@nestjs/schematics": "^12.0.0",
-    "@nestjs/testing": "^12.0.1",
+    "@nestjs/cli": "^12.0.15",
+    "@nestjs/schematics": "^12.0.16",
+    "@nestjs/testing": "^12.6.0",
     "@types/cookie-parser": "^1.4.10",
     "@types/express": "^5.0.0",
     "@types/node": "^22.20.5",
@@ -62,7 +62,7 @@
     "@types/supertest": "^7.0.0",
     "@vitest/coverage-v8": "^5.1.1",
     "oxlint": "^1.58.0",
-    "oxlint-tsgolint": "^7.0.2001",
+    "oxlint-tsgolint": "^7.0.2008",
     "pino-pretty": "^13.2.0",
     "prettier": "^3.4.2",
     "source-map-support": "^0.5.21",
